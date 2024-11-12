@@ -1,0 +1,15 @@
+obs.keys()
+odict_keys(['agent', 'extra'])
+obs['agent'].keys()
+odict_keys(['qpos', 'qvel'])
+obs['extra'].keys()
+odict_keys(['is_grasped', 'tcp_pose', 'goal_pos', 'obj_pose', 'tcp_to_obj_pos', 'obj_to_goal_pos'])
+
+
+
+env.base_env.get_obs().keys()
+dict_keys(['agent', 'extra'])
+env.base_env.get_obs()['agent'].keys()
+dict_keys(['qpos', 'qvel'])
+env.base_env.get_obs()['extra'].keys()
+dict_keys(['is_grasped', 'tcp_pose', 'goal_pos', 'obj_pose', 'tcp_to_obj_pos', 'obj_to_goal_pos'])
