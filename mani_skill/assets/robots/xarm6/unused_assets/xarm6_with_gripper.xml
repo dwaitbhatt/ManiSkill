@@ -1,0 +1,184 @@
+<mujoco model="xarm6">
+
+  <actuator>
+    <!-- Physical limits of the actuator. -->
+    <motor ctrllimited="true" ctrlrange="-50.0 50.0" joint="joint1" name="torq_j1"/>
+    <motor ctrllimited="true" ctrlrange="-50.0 50.0" joint="joint2" name="torq_j2"/>
+    <!-- <motor ctrllimited="true" ctrlrange="-32.0 32.0" joint="joint3" name="torq_j3"/> -->
+    <!-- <motor ctrllimited="true" ctrlrange="-32.0 32.0" joint="joint4" name="torq_j4"/> -->
+    <!-- <motor ctrllimited="true" ctrlrange="-32.0 32.0" joint="joint5" name="torq_j5"/> -->
+    <motor ctrllimited="true" ctrlrange="-50.0 50.0" joint="joint3" name="torq_j3"/>
+    <motor ctrllimited="true" ctrlrange="-50.0 50.0" joint="joint4" name="torq_j4"/>
+    <motor ctrllimited="true" ctrlrange="-50.0 50.0" joint="joint5" name="torq_j5"/>
+    <motor ctrllimited="true" ctrlrange="-20.0 20.0" joint="joint6" name="torq_j6"/>
+
+    <position name='finger_1' ctrllimited="true" kp="2" joint='drive_joint' ctrlrange='0 0.85'/>
+    <position name='finger_2' ctrllimited="true" kp="2" joint='right_outer_knuckle_joint' ctrlrange='0 0.85'/>
+  </actuator>
+
+  <asset>
+    <mesh name="base_v" file="visual/base.stl"/>
+    <!-- <mesh name="base_c" file="collision/base_vhacd.obj"/> -->
+    <mesh name="base_c" file="visual/base.stl"/>
+    
+    <mesh name="link1_v" file="visual/link1.stl"/>
+    <!-- <mesh name="link1_c" file="collision/link1_vhacd.obj"/> -->
+    <mesh name="link1_c" file="visual/link1.stl"/>
+    
+    <mesh name="link2_v" file="visual/link2.stl"/>
+    <!-- <mesh name="link2_c" file="collision/link2_vhacd2.obj"/> -->
+    <mesh name="link2_c" file="visual/link2.stl"/>
+    
+    <mesh name="link3_v" file="visual/link3.stl"/>
+    <!-- <mesh name="link3_c" file="collision/link3_vhacd.obj"/> -->
+    <mesh name="link3_c" file="visual/link3.stl"/>
+    
+    <mesh name="link4_v" file="visual/link4.stl"/>
+    <!-- <mesh name="link4_c" file="collision/link4_vhacd.obj"/> -->
+    <mesh name="link4_c" file="visual/link4.stl"/>
+    
+    <mesh name="link5_v" file="visual/link5.stl"/>
+    <!-- <mesh name="link5_c" file="collision/link5_vhacd.obj"/> -->
+    <mesh name="link5_c" file="visual/link5.stl"/>
+    
+    <mesh name="link6_v" file="visual/link6.stl"/>
+    <!-- <mesh name="link6_c" file="collision/link6_vhacd.obj"/> -->
+    <mesh name="link6_c" file="visual/link6.stl"/>
+    
+    <mesh name="base_link" file="meshes_xarm_gripper/base_link.STL"/>
+    <mesh name="base_link_collision" file="meshes_xarm_gripper/base_link_collision.STL"/>
+    <mesh name="left_outer_knuckle" file="meshes_xarm_gripper/left_outer_knuckle.STL"/>
+    <mesh name="left_finger" file="meshes_xarm_gripper/left_finger.STL"/>
+    <mesh name="left_inner_knuckle" file="meshes_xarm_gripper/left_inner_knuckle.STL"/>
+    <mesh name="right_outer_knuckle" file="meshes_xarm_gripper/right_outer_knuckle.STL"/>
+    <mesh name="right_finger" file="meshes_xarm_gripper/right_finger.STL"/>
+    <mesh name="right_inner_knuckle" file="meshes_xarm_gripper/right_inner_knuckle.STL"/>
+  </asset>
+
+  <tendon>
+    <!--finger2 tendons-->
+    <fixed name="finger2_12_cpl" range="-1 1" stiffness="0.1" springlength="0.1" limited="true">
+      <joint joint="drive_joint"  coef="1"/>
+      <joint joint="left_finger_joint"  coef="-3"/>
+      <joint joint="left_inner_knuckle_joint"  coef="-1"/>
+    </fixed>
+
+    <!--Finger1 tendons-->
+    <fixed name="finger1_12_cpl" range="-1 1" stiffness="0.1" springlength="0.1" limited="true">
+      <joint joint="right_outer_knuckle_joint"  coef="1"/>
+      <joint joint="right_finger_joint"  coef="-3"/>
+      <joint joint="right_inner_knuckle_joint"  coef="-1"/>
+    </fixed>
+  </tendon>
+
+  <worldbody>
+    <body name="base" pos="0 0 0">
+      <!-- robot view -->
+      <!-- <camera mode="fixed" name="robotview" pos="1.0 0 0.4" quat="0.653 0.271 0.271 0.653"/> -->
+      <inertial diaginertia="0 0 0" mass="0" pos="0 0 0"/>
+      <!-- mount attached here -->
+      <body name="link0" pos="0 0 0">
+        <inertial pos="0 0 0.05" mass="4" diaginertia="0.4 0.4 0.4" /> <!--This is unknown-->
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="base_c" name="link0_collision"/>
+        <geom type="mesh" rgba="1 1 1 1" mesh="base_v" name="link0_visual"/>
+        <body name="link1" pos="0 0 0.267">
+          <inertial pos="-0.002 0.02692 -0.01332" quat="0.983139 0.180751 -0.00455228 0.0272976" mass="2.16" diaginertia="0.00539487 0.00519906 0.00281397"/>
+          <joint name="joint1" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1" frictionloss="1"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="link1_c" name="link1_collision"/>
+          <geom type="mesh" rgba="1 1 1 1" mesh="link1_v" name="link1_visual"/>
+          <body name="link2" quat="0.707105 -0.707108 0 0">
+            <inertial pos="0.03531 -0.21398 0.03386" quat="0.71118 0.614686 0.139936 -0.311132" mass="1.71" diaginertia="0.017867 0.017867 0.017867"/>
+            <joint name="joint2" pos="0 0 0" axis="0 0 1" limited="true" range="-2.059 2.0944" damping="1" frictionloss="1"/>
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="link2_c" name="link2_collision"/>
+            <geom type="mesh" rgba="1 1 1 1" mesh="link2_v" name="link2_visual"/>
+            <body name="link3" pos="0.0535 -0.2845 0">
+              <inertial pos="0.06781 0.10749 0.01457" quat="0.119516 0.409082 -0.734824 0.527638" mass="1.384" diaginertia="0.004543 0.004543 0.004543"/>
+              <joint name="joint3" pos="0 0 0" axis="0 0 1" limited="true" range="-3.927 0.19198" damping="1" frictionloss="1"/>
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="link3_c" name="link3_collision"/>
+              <geom type="mesh" rgba="1 1 1 1" mesh="link3_v" name="link3_visual"/>
+              <body name="link4" pos="0.0775 0.3425 0" quat="0.707105 -0.707108 0 0">
+                <inertial pos="-0.00021 0.02578 -0.02538" quat="0.994019 0.0752563 -0.00686804 0.0788347" mass="1.115" diaginertia="0.00440091 0.00406855 0.00103407"/>
+                <joint name="joint4" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1" frictionloss="1"/>
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="link4_c" name="link4_collision"/>
+                <geom type="mesh" rgba="1 1 1 1" mesh="link4_v" name="link4_visual"/>
+                <body name="link5" quat="0.707105 0.707108 0 0">
+                  <inertial pos="0.05428 0.01781 0.00543" quat="-0.0766302 0.578118 -0.269638 0.766291" mass="1.275" diaginertia="0.00289757 0.0023276 0.000951789"/>
+                  <joint name="joint5" pos="0 0 0" axis="0 0 1" limited="true" range="-1.69297 3.14159" damping="1" frictionloss="1"/>
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="link5_c" name="link5_collision"/>
+                  <geom type="mesh" rgba="1 1 1 1" mesh="link5_v" name="link5_visual"/>
+                  <body name="link6" pos="0.076 0.097 0" quat="0.707105 -0.707108 0 0">
+                    <inertial pos="0 0.00064 -0.00952" quat="0 0.707107 0 0.707107" mass="0.1096" diaginertia="7.9715e-05 4.8111e-05 4.5293e-05"/>
+                    <joint name="joint6" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1" frictionloss="1"/>
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="link6_c" name="link6_collision"/>
+                    <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="link6_v" name="link6_visual"/>
+
+                    <!-- Gripper -->
+                    <body name="right_gripper" pos="0 0 0" quat="1 0 0 0 ">
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="base_link" name="base_link"/>
+                      <geom type="mesh" rgba="1 1 1 1" mesh="base_link_collision" name="base_link_collision"/>
+                      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1"/>
+                      <!-- This site was added for visualization. -->
+                      <!-- Need to tune grip site -->
+                      <body name="eef" pos="0 0 0.15" quat="1 0 0 0">
+                        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1"/>
+                        <site name="ee_x" pos="0.1 0 0" size="0.005 .1"  quat="0.707105  0 0.707108 0 " rgba="1 0 0 0" type="cylinder" group="1"/>
+                        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1"/>
+                        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1"/>
+                        <!-- This site was added for visualization. -->
+                        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1"/>
+                      </body>
+                      <body name="left_outer_knuckle" pos="0 0.035 0.059098">
+                        <inertial pos="0 0.021559 0.015181" quat="0.47789 0.87842 0 0" mass="0.033618" diaginertia="1.9111e-05 1.79089e-05 1.90167e-06"/>
+                        <joint name="drive_joint" pos="0 0 0" axis="1 0 0" limited="true" range="0 0.85"/>
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="left_outer_knuckle" name="left_outer_knuckle"/>
+                        <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="left_outer_knuckle" name="left_outer_knuckle_collision"/>
+                        <body name="left_finger" pos="0 0.035465 0.042039">
+                          <inertial pos="0 -0.016413 0.029258" quat="0.697634 0.115353 -0.115353 0.697634" mass="0.048304" diaginertia="1.88037e-05 1.7493e-05 3.56792e-06"/>
+                          <joint name="left_finger_joint" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.85"/>
+                          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="left_finger" name="left_finger"/>
+                          <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="left_finger" name="left_finger_collision"/>
+                          <geom size="0.011 0.003175 0.01875" pos="0 -0.0220203 0.03242" type="box" contype="0" conaffinity="0" group="1" rgba="0.9 0.9 0.9 1" name="left_fingertip_visual" />
+                          <geom size="0.011 0.003175 0.01875" pos="0 -0.0220203 0.03242" type="box" group="0" rgba="0.9 0.9 0.9 1" name="left_fingertip_collision" solref="0.01 0.25" />
+                          <geom size="0.010 0.001 0.01675" pos="0 -0.0245203 0.03242" type="box" group="0" name="left_fingerpad_collision" />
+                        </body>
+                      </body>
+                      <body name="left_inner_knuckle" pos="0 0.02 0.074098">
+                        <inertial pos="1.86601e-06 0.0220468 0.0261335" quat="0.664139 -0.242732 0.242713 0.664146" mass="0.0230126" diaginertia="8.34216e-06 6.0949e-06 2.75601e-06"/>
+                        <joint name="left_inner_knuckle_joint" pos="0 0 0" axis="1 0 0" limited="true" range="0 0.85"/>
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="left_inner_knuckle" name="left_inner_knuckle"/>
+                        <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="left_inner_knuckle" name="left_inner_knuckle_collision"/>
+                      </body>
+                      <body name="right_outer_knuckle" pos="0 -0.035 0.059098">
+                        <inertial pos="0 -0.021559 0.015181" quat="0.87842 0.47789 0 0" mass="0.033618" diaginertia="1.9111e-05 1.79089e-05 1.90167e-06"/>
+                        <joint name="right_outer_knuckle_joint" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.85"/>
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="right_outer_knuckle" name="right_outer_knuckle"/>
+                        <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="right_outer_knuckle" name="right_outer_knuckle_collision"/>
+                        <body name="right_finger" pos="0 -0.035465 0.042039">
+                          <inertial pos="0 0.016413 0.029258" quat="0.697634 -0.115356 0.115356 0.697634" mass="0.048304" diaginertia="1.88038e-05 1.7493e-05 3.56779e-06"/>
+                          <joint name="right_finger_joint" pos="0 0 0" axis="1 0 0" limited="true" range="0 0.85"/>
+                          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="right_finger" name="right_finger"/>
+                          <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="right_finger" name="right_finger_collision"/>
+                          <geom size="0.011 0.003175 0.01875" pos="0 0.0220203 0.03242" type="box" contype="0" conaffinity="0" group="1" rgba="0.9 0.9 0.9 1" name="right_fingertip_visual" />
+                          <geom size="0.011 0.003175 0.01875" pos="0 0.0220203 0.03242" type="box" group="0" rgba="0.9 0.9 0.9 1" name="right_fingertip_collision" solref="0.01 0.25" />
+                          <geom size="0.010 0.001 0.01675" pos="0 0.0245203 0.03242" type="box" group="0" name="right_fingerpad_collision" />
+                        </body>
+                      </body>
+                      <body name="right_inner_knuckle" pos="0 -0.02 0.074098">
+                        <inertial pos="1.866e-06 -0.022047 0.026133" quat="0.66415 0.242702 -0.242721 0.664144" mass="0.023013" diaginertia="8.34209e-06 6.0949e-06 2.75601e-06"/>
+                        <joint name="right_inner_knuckle_joint" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.85"/>
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.753 0.753 0.753 1" mesh="right_inner_knuckle" name="right_inner_knuckle"/>
+                        <geom type="mesh" rgba="0.753 0.753 0.753 1" mesh="right_inner_knuckle" name="right_inner_knuckle_collision"/>
+                      </body>
+                    </body>
+
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+</mujoco>
