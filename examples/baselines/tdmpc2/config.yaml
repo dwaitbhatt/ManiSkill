@@ -10,7 +10,7 @@ num_eval_envs: 4
 env_type: gpu # cpu
 render_mode: rgb_array # ['rgb_array' for quality, or 'sensors' for speed]
 render_size: 64
-setting_tag: none # ['none', 'walltime_efficient', 'sample_efficient', ...] for wandb tags
+setting_tag: none # ['none', 'walltime_effi cient', 'sample_efficient', ...] for wandb tags
 
 # evaluation
 checkpoint: ???
