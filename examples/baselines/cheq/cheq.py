@@ -3,9 +3,9 @@ import random
 import time
 from dataclasses import dataclass
 from typing import Optional
+import numpy as np
 
 import gymnasium as gym
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -20,7 +20,6 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from mani_skill.utils.wrappers.flatten import FlattenActionSpaceWrapper
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.utils import gym_utils
-
 
 @dataclass
 class CHEQArgs:
@@ -89,15 +88,10 @@ class CHEQArgs:
     lam_high: float = 1.0
     lam_low: float = 0.2
 
-
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
-
 class ActorWithLambda(nn.Module):
-    """
-    RL Actor that expects [state_dim + 1] as input (the last dim is λ).
-    """
     def __init__(self, obs_dim_plus_1: int, act_dim: int):
         super().__init__()
         self.fc1 = nn.Linear(obs_dim_plus_1, 256)
@@ -143,9 +137,7 @@ class ActorWithLambda(nn.Module):
         eval_act = torch.tanh(mean)*self.action_scale + self.action_bias
         return act, log_prob, eval_act
 
-
 class SoftQNetwork(nn.Module):
-    """One Q-network expecting [obs_dim+1, action_dim]."""
     def __init__(self, obs_dim_plus_1: int, act_dim: int):
         super().__init__()
         self.fc1 = nn.Linear(obs_dim_plus_1 + act_dim, 256)
@@ -160,11 +152,7 @@ class SoftQNetwork(nn.Module):
         x = F.relu(self.fc3(x))
         return self.fc4(x)
 
-
 class ActorPriorNoLambda(nn.Module):
-    """
-    Prior policy (used a BC policy in this case): trained only on original 'state_dim' (no lambda).
-    """
     def __init__(self, obs_dim: int, act_dim: int):
         super().__init__()
         self.fc1 = nn.Linear(obs_dim, 256)
@@ -209,10 +197,6 @@ class ActorPriorNoLambda(nn.Module):
         eval_act = torch.tanh(mean)*self.action_scale + self.action_bias
         return act, log_prob, eval_act
 
-
-# ---------------------------------------------------------------------
-# 3) REPLAY (Bernoulli)
-# ---------------------------------------------------------------------
 class ReplayBufferSample:
     def __init__(self, obs, next_obs, actions, rewards, dones, masks):
         self.obs = obs
@@ -222,9 +206,7 @@ class ReplayBufferSample:
         self.dones = dones
         self.masks = masks
 
-
 class BernoulliMaskReplayBuffer:
-    """Stores transitions with a random 0/1 mask for each ensemble Q."""
     def __init__(self, buffer_size, obs_dim_plus_1, act_dim, ensemble_size, p_masking, device):
         self.buffer_size = buffer_size
         self.pos = 0
@@ -270,28 +252,16 @@ class BernoulliMaskReplayBuffer:
             masks=self.masks[idxs]
         )
 
-# ---------------------------------------------------------------------
-# 4) UTILS
-# ---------------------------------------------------------------------
 def inject_weight_into_state(s: torch.Tensor, lam: float) -> torch.Tensor:
-    """
-    s: [N, obs_dim], lam -> produce shape [N, obs_dim+1].
-    """
     N = s.shape[0]
     lam_col = torch.full((N, 1), lam, dtype=s.dtype, device=s.device)
     return torch.cat([s, lam_col], dim=1)
 
 def remove_lambda_dimension(obs_aug: torch.Tensor) -> torch.Tensor:
-    """If obs_aug is [N, obs_dim+1], strip off the last dim => [N, obs_dim]."""
     return obs_aug[..., :-1]
 
-# ---------------------------------------------------------------------
-# 5) MAIN TRAINING
-# ---------------------------------------------------------------------
 def train_cheq(args: CHEQArgs):
-    # A) Seeding & device
     random.seed(args.seed)
-    np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if args.torch_deterministic:
         torch.backends.cudnn.deterministic = True
@@ -300,7 +270,6 @@ def train_cheq(args: CHEQArgs):
     run_name = args.exp_name or "cheq_experiment"
     run_name = f"{args.env_id}__{run_name}__{args.seed}__{int(time.time())}"
 
-    # B) Create env
     env_kwargs = dict(
         obs_mode=args.obs_mode,
         render_mode=args.render_mode,
@@ -310,13 +279,14 @@ def train_cheq(args: CHEQArgs):
     )
     train_env = gym.make(
         args.env_id,
+        robot_uids = "xarm6_pandagripper",
         num_envs=args.num_envs if not args.evaluate else 1,
         **env_kwargs
     )
     eval_env = gym.make(
         args.env_id,
+        robot_uids = "xarm6_pandagripper",
         num_envs=args.num_eval_envs,
-        reconfiguration_freq=args.eval_reconfiguration_freq,
         **env_kwargs
     )
 
@@ -345,7 +315,6 @@ def train_cheq(args: CHEQArgs):
     obs_dim_plus_1   = original_obs_dim + 1
     act_dim          = np.prod(train_env.single_action_space.shape)
 
-    # C) RL Actor, Q ensemble
     actor = ActorWithLambda(obs_dim_plus_1, act_dim).to(device)
     actor.configure_action_scale(train_env.single_action_space)
 
@@ -357,9 +326,8 @@ def train_cheq(args: CHEQArgs):
     q_optimizer = optim.Adam([p for qf in qfs for p in qf.parameters()], lr=args.q_lr)
     actor_optimizer = optim.Adam(actor.parameters(), lr=args.policy_lr)
 
-    # alpha
     if args.autotune:
-        target_entropy = -float(act_dim)  # typical
+        target_entropy = -float(act_dim)
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         alpha = log_alpha.exp().item()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
@@ -367,16 +335,20 @@ def train_cheq(args: CHEQArgs):
         alpha = args.alpha
         log_alpha = None
 
-    # D) Prior actor if provided
     prior_actor = None
     if args.prior_ckpt:
         prior_actor = ActorPriorNoLambda(original_obs_dim, act_dim).to(device)
         prior_actor.configure_action_scale(train_env.single_action_space)
         prior_ckpt = torch.load(args.prior_ckpt, map_location=device)
-        prior_actor.load_state_dict(prior_ckpt['actor'])
-        print(f"[CHEQ] Loaded prior from {args.prior_ckpt}")
+        if 'actor' in prior_ckpt:
+            current_state = prior_actor.state_dict()
+            loaded_state = prior_ckpt['actor']
+            current_state.update({k: v for k, v in loaded_state.items() if k in current_state})
+            prior_actor.load_state_dict(current_state)
+            print(f"[CHEQ] Loaded prior from {args.prior_ckpt}")
+        else:
+            print(f"[CHEQ] Warning: No 'actor' key found in checkpoint {args.prior_ckpt}")
 
-    # E) Replay buffer
     rb = BernoulliMaskReplayBuffer(
         buffer_size=args.buffer_size,
         obs_dim_plus_1=obs_dim_plus_1,
@@ -386,11 +358,10 @@ def train_cheq(args: CHEQArgs):
         device=device
     )
 
-    # F) Helpers: uncertainty & lambda
     def compute_uncertainty(obs_aug, pi_act):
         with torch.no_grad():
             qs = [qf(obs_aug, pi_act) for qf in qfs]
-            qs_cat = torch.cat(qs, dim=1)  # [N, ensemble_size]
+            qs_cat = torch.cat(qs, dim=1)
             return qs_cat.std(dim=1)
 
     def get_lambda(u):
@@ -402,7 +373,6 @@ def train_cheq(args: CHEQArgs):
             frac = (u - args.ulow)/(args.uhigh - args.ulow)
             return args.lam_low + frac*(args.lam_high - args.lam_low)
 
-    # G) Logging
     if args.track:
         wandb.init(
             project=args.wandb_project_name,
@@ -412,72 +382,64 @@ def train_cheq(args: CHEQArgs):
         )
     writer = SummaryWriter(f"runs/{run_name}") if not args.evaluate else None
 
-    # H) Main training loop
-    obs_np, _ = train_env.reset(seed=args.seed)
-    obs_t = torch.from_numpy(obs_np).float().to(device)
+    obs_t, _ = train_env.reset(seed=args.seed)
 
     global_step = 0
     start_time = time.time()
     learning_starts_actor = args.learning_starts_actor or args.learning_starts
 
     def do_evaluation(step_num: int):
-        """Simple evaluation loop with the same CHEQ logic (uncertainty-based λ).
-           We run parallel for `args.num_eval_steps` steps, log average return."""
-        actor.eval()
-        if prior_actor:
-            prior_actor.eval()
+      actor.eval()
+      if prior_actor:
+          prior_actor.eval()
 
-        eval_obs_np, _ = eval_env.reset()
-        eval_obs_t = torch.from_numpy(eval_obs_np).float().to(device)
-        # We track returns for each parallel env
-        ret = np.zeros(args.num_eval_envs, dtype=np.float32)
-        # For simplicity, we do a fixed number of steps
-        for _eval_step in range(args.num_eval_steps):
-            # measure RL action
-            obs_aug_eval = inject_weight_into_state(eval_obs_t, lam=1.0)  # temporarily 1.0 for unc. measure
-            with torch.no_grad():
-                pi_eval_act, _, _ = actor.get_action(obs_aug_eval, deterministic=True)
-            # measure uncertainty => real lam
-            stdvals = compute_uncertainty(obs_aug_eval, pi_eval_act)
-            lam_eval = get_lambda(stdvals.mean().item())  # or do per-env
-            # final action
-            prior_act = None
-            if prior_actor is not None:
-                pure_obs_eval = remove_lambda_dimension(obs_aug_eval)
-                prior_act, _, _ = prior_actor.get_action(pure_obs_eval, deterministic=True)
-            else:
-                prior_act = torch.zeros_like(pi_eval_act)
-            final_eval_action = lam_eval*pi_eval_act + (1 - lam_eval)*prior_act
-            # step
-            next_eval_obs_np, rew_np, done_np, trunc_np, infos = eval_env.step(final_eval_action)
-            # accumulate return
-            ret += rew_np
-            eval_obs_t = torch.from_numpy(next_eval_obs_np).float().to(device)
+      eval_obs_t, _ = eval_env.reset()
+      ret = torch.zeros(args.num_eval_envs, dtype=torch.float32, device=device)  # Ensure ret is on the same device
 
-        mean_ret = ret.mean()
-        if writer:
-            writer.add_scalar("eval/return", mean_ret, step_num)
-        if args.track:
-            wandb.log({"eval/return": mean_ret}, step=step_num)
+      for _eval_step in range(args.num_eval_steps):
+          obs_aug_eval = inject_weight_into_state(eval_obs_t, lam=1.0)
+          with torch.no_grad():
+              pi_eval_act, _, _ = actor.get_action(obs_aug_eval, deterministic=True)
+          stdvals = compute_uncertainty(obs_aug_eval, pi_eval_act)
+          lam_eval = get_lambda(stdvals.mean().item())
+          prior_act = None
+          if prior_actor is not None:
+              pure_obs_eval = remove_lambda_dimension(obs_aug_eval)
+              prior_act, _, _ = prior_actor.get_action(pure_obs_eval, deterministic=True)
+          else:
+              prior_act = torch.zeros_like(pi_eval_act)
+          final_eval_action = lam_eval * pi_eval_act + (1 - lam_eval) * prior_act
 
-        actor.train()
-        if prior_actor:
-            prior_actor.train()
-        return mean_ret
+          next_eval_obs_t, rew_t, done_t, trunc_t, infos = eval_env.step(final_eval_action)
+
+          # Accumulate rewards
+          ret += rew_t  # Both ret and rew_t are on the same device now
+          eval_obs_t = next_eval_obs_t
+
+      mean_ret = ret.mean().item()
+      if writer:
+          writer.add_scalar("eval/return", mean_ret, step_num)
+      if args.track:
+          wandb.log({"eval/return": mean_ret}, step=step_num)
+
+      actor.train()
+      if prior_actor:
+          prior_actor.train()
+      return mean_ret
+
 
     for step in tqdm.trange(args.total_timesteps // args.num_envs):
         global_step += args.num_envs
 
-        # 1) compute RL action
         lam_temp = 1.0 if (global_step >= args.learning_starts) else 0.0
         obs_aug = inject_weight_into_state(obs_t, lam_temp)
+
         if global_step >= args.learning_starts or not args.start_random:
             with torch.no_grad():
                 pi_action, _, _ = actor.get_action(obs_aug, deterministic=False)
         else:
             pi_action = torch.tensor(train_env.action_space.sample(), dtype=torch.float32, device=device)
 
-        # 2) prior action
         if prior_actor is not None:
             plain_s = remove_lambda_dimension(obs_aug)
             with torch.no_grad():
@@ -485,37 +447,32 @@ def train_cheq(args: CHEQArgs):
         else:
             prior_act = torch.zeros_like(pi_action, device=device)
 
-        # 3) measure uncertainty => real lam
         if global_step < args.learning_starts:
             lam_actual = 0.0
         else:
             stdvals = compute_uncertainty(obs_aug, pi_action)
             lam_actual = get_lambda(stdvals.mean().item())
 
-        # 4) final action
-        final_action = lam_actual*pi_action + (1 - lam_actual)*prior_act
+        final_action = lam_actual * pi_action + (1 - lam_actual) * prior_act
 
-        # step environment
-        next_obs_np, rew_np, done_np, trunc_np, infos = train_env.step(final_action)
-        next_obs_t = torch.from_numpy(next_obs_np).float().to(device)
+        next_obs_t, rew_t, done_t, trunc_t, infos = train_env.step(final_action)
 
-        # store in replay
         obs_aug_true = inject_weight_into_state(obs_t, lam_actual)
         next_obs_aug_true = inject_weight_into_state(next_obs_t, lam_actual)
+
         rb.add(
             obs_aug_true[0],
             next_obs_aug_true[0],
             pi_action[0],
-            torch.tensor([rew_np[0]], dtype=torch.float32, device=device),
-            torch.tensor([done_np[0] or trunc_np[0]], dtype=torch.float32, device=device)
+            rew_t[0].unsqueeze(0),
+            (done_t[0] | trunc_t[0]).float().unsqueeze(0),
         )
+
         obs_t = next_obs_t
 
-        # 5) train updates
         if global_step >= args.learning_starts:
             for _ in range(args.grad_steps_per_iteration):
                 batch = rb.sample(args.batch_size)
-                # Critic update
                 with torch.no_grad():
                     next_pi, next_logp, _ = actor.get_action(batch.next_obs)
                     q_targets = []
@@ -565,25 +522,17 @@ def train_cheq(args: CHEQArgs):
                     a_optimizer.step()
                     alpha = log_alpha.exp().item()
 
-        # 6) logging
         if writer is not None and (global_step % args.log_freq == 0):
             writer.add_scalar("rollout/lambda", lam_actual, global_step)
             writer.add_scalar("time/elapsed", time.time() - start_time, global_step)
-            if global_step >= args.learning_starts:
-                writer.add_scalar("losses/q_loss_total", q_loss_total.item(), global_step)
-                if args.autotune:
-                    writer.add_scalar("alpha/value", alpha, global_step)
 
-        # 7) Evaluate if needed
-        if (not args.evaluate) and (global_step % args.eval_freq == 0):
+        if not args.evaluate and global_step % args.eval_freq == 0:
             eval_return = do_evaluation(global_step)
             print(f"[Eval @ Step {global_step}] Return: {eval_return:.3f}")
 
-        # end condition
         if global_step >= args.total_timesteps:
             break
 
-    # 8) final save
     if not args.evaluate and args.save_model:
         os.makedirs(f"runs/{run_name}/checkpoints", exist_ok=True)
         ckpt_path = f"runs/{run_name}/checkpoints/cheq_final.pt"
@@ -604,3 +553,5 @@ def train_cheq(args: CHEQArgs):
 if __name__ == "__main__":
     args = tyro.cli(CHEQArgs)
     train_cheq(args)
+
+
