@@ -37,7 +37,7 @@ class CHEQArgs:
     num_eval_envs: int = 4
     partial_reset: bool = False
     eval_partial_reset: bool = False
-    control_mode: Optional[str] = "pd_joint_delta_pos"
+    control_mode: Optional[str] = "pd_joint_vel"
     reconfiguration_freq: Optional[int] = None
     eval_reconfiguration_freq: Optional[int] = 1
     obs_mode: str = "state"
@@ -48,7 +48,9 @@ class CHEQArgs:
     total_timesteps: int = 1_000_000
     evaluate: bool = False
     eval_freq: int = 10_000
-    num_eval_steps: int = 50
+    num_steps: int = 400
+    num_eval_steps: int = 400
+    env_horizon: int = 400
     capture_video: bool = False
     save_trajectory: bool = False
     save_model: bool = True
@@ -59,7 +61,7 @@ class CHEQArgs:
     buffer_device: str = "cuda"
 
     # training hyperparams
-    gamma: float = 0.99
+    gamma: float = 0.8
     tau: float = 0.005
     policy_lr: float = 3e-4
     q_lr: float = 1e-3
@@ -80,7 +82,7 @@ class CHEQArgs:
     random_target: bool = True
 
     # prior
-    prior_ckpt: Optional[str] = None  # path to .pt containing 'actor' dict
+    prior_ckpt: Optional[str] = None  # path to .pt containing 'actor' dict (BC)
 
     # cheq mixing
     uhigh: float = 0.15
@@ -92,6 +94,9 @@ LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
 class ActorWithLambda(nn.Module):
+    """
+    RL policy: receives (obs + 1D lambda) -> outputs action distribution.
+    """
     def __init__(self, obs_dim_plus_1: int, act_dim: int):
         super().__init__()
         self.fc1 = nn.Linear(obs_dim_plus_1, 256)
@@ -104,9 +109,9 @@ class ActorWithLambda(nn.Module):
         self.action_bias  = nn.Parameter(torch.zeros(act_dim), requires_grad=False)
 
     def configure_action_scale(self, action_space: gym.spaces.Box):
-        h, l = action_space.high, action_space.low
-        scale = torch.tensor((h - l)/2.0, dtype=torch.float32)
-        bias  = torch.tensor((h + l)/2.0, dtype=torch.float32)
+        high, low = action_space.high, action_space.low
+        scale = torch.tensor((high - low)/2.0, dtype=torch.float32)
+        bias  = torch.tensor((high + low)/2.0, dtype=torch.float32)
         self.action_scale.copy_(scale)
         self.action_bias.copy_(bias)
 
@@ -114,10 +119,11 @@ class ActorWithLambda(nn.Module):
         x = F.relu(self.fc1(obs_plus_lambda))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
+
         mean = self.fc_mean(x)
         log_std = self.fc_logstd(x)
         log_std = torch.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5*(LOG_STD_MAX - LOG_STD_MIN)*(log_std + 1)
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN)*(log_std + 1)
         return mean, log_std
 
     def get_action(self, obs_plus_lambda, deterministic=False):
@@ -131,9 +137,11 @@ class ActorWithLambda(nn.Module):
         z = dist.rsample()
         y = torch.tanh(z)
         act = y*self.action_scale + self.action_bias
+
         log_prob = dist.log_prob(z)
         log_prob -= torch.log(self.action_scale*(1 - y**2) + 1e-6)
         log_prob = log_prob.sum(dim=1, keepdim=True)
+
         eval_act = torch.tanh(mean)*self.action_scale + self.action_bias
         return act, log_prob, eval_act
 
@@ -152,50 +160,39 @@ class SoftQNetwork(nn.Module):
         x = F.relu(self.fc3(x))
         return self.fc4(x)
 
-class ActorPriorNoLambda(nn.Module):
+class ActorPriorBC(nn.Module):
+    """
+    BC policy that expects only the plain obs (no lambda dimension).
+    """
     def __init__(self, obs_dim: int, act_dim: int):
         super().__init__()
-        self.fc1 = nn.Linear(obs_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, act_dim)
-        self.fc_logstd = nn.Linear(256, act_dim)
-
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, act_dim),
+        )
         self.action_scale = nn.Parameter(torch.ones(act_dim), requires_grad=False)
         self.action_bias  = nn.Parameter(torch.zeros(act_dim), requires_grad=False)
 
     def configure_action_scale(self, action_space: gym.spaces.Box):
-        h, l = action_space.high, action_space.low
-        scale = torch.tensor((h - l)/2.0, dtype=torch.float32)
-        bias  = torch.tensor((h + l)/2.0, dtype=torch.float32)
+        high, low = action_space.high, action_space.low
+        scale = torch.tensor((high - low)/2.0, dtype=torch.float32)
+        bias  = torch.tensor((high + low)/2.0, dtype=torch.float32)
         self.action_scale.copy_(scale)
         self.action_bias.copy_(bias)
 
-    def forward(self, plain_obs):
-        x = F.relu(self.fc1(plain_obs))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
-        log_std = torch.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5*(LOG_STD_MAX - LOG_STD_MIN)*(log_std + 1)
-        return mean, log_std
+    def forward(self, obs):
+        return self.net(obs)
 
-    def get_action(self, plain_obs, deterministic=False):
-        mean, log_std = self(plain_obs)
-        if deterministic:
-            act = torch.tanh(mean)*self.action_scale + self.action_bias
-            return act, None, act
-        std = log_std.exp()
-        dist = torch.distributions.Normal(mean, std)
-        z = dist.rsample()
-        y = torch.tanh(z)
-        act = y*self.action_scale + self.action_bias
-        log_prob = dist.log_prob(z)
-        log_prob -= torch.log(self.action_scale*(1 - y**2) + 1e-6)
-        log_prob = log_prob.sum(dim=1, keepdim=True)
-        eval_act = torch.tanh(mean)*self.action_scale + self.action_bias
-        return act, log_prob, eval_act
+    def get_action(self, obs, deterministic=True):
+        # We'll do a simple tanh-squash for BC
+        x = self.forward(obs)
+        act = torch.tanh(x)*self.action_scale + self.action_bias
+        return act, None, act
 
 class ReplayBufferSample:
     def __init__(self, obs, next_obs, actions, rewards, dones, masks):
@@ -217,7 +214,9 @@ class BernoulliMaskReplayBuffer:
         self.actions = torch.zeros((buffer_size, act_dim), device=device)
         self.rewards = torch.zeros((buffer_size, 1), device=device)
         self.dones   = torch.zeros((buffer_size, 1), device=device)
-        self.masks   = torch.zeros((buffer_size, ensemble_size), device=device)
+
+        # Mask for each ensemble head
+        self.masks = torch.zeros((buffer_size, ensemble_size), device=device)
 
         self.ensemble_size = ensemble_size
         self.p_masking = p_masking
@@ -252,24 +251,49 @@ class BernoulliMaskReplayBuffer:
             masks=self.masks[idxs]
         )
 
-def inject_weight_into_state(s: torch.Tensor, lam: float) -> torch.Tensor:
-    N = s.shape[0]
-    lam_col = torch.full((N, 1), lam, dtype=s.dtype, device=s.device)
-    return torch.cat([s, lam_col], dim=1)
+def inject_weight_into_state(obs: torch.Tensor, lam: torch.Tensor) -> torch.Tensor:
+    """
+    lam is shape [N, 1], obs is shape [N, obs_dim].
+    We cat them -> shape [N, obs_dim+1].
+    """
+    return torch.cat([obs, lam], dim=1)
 
 def remove_lambda_dimension(obs_aug: torch.Tensor) -> torch.Tensor:
     return obs_aug[..., :-1]
 
+def get_lambda(u: torch.Tensor, args: CHEQArgs):
+    """
+    Map uncertainty u to a mixture weight lambda in [lam_low, lam_high].
+    u: shape [N]. Return shape [N,1].
+    """
+    lam_vals = torch.empty_like(u)
+    lower_mask = (u <= args.ulow)
+    upper_mask = (u >= args.uhigh)
+    mid_mask   = ~(lower_mask | upper_mask)
+
+    lam_vals[lower_mask] = args.lam_low
+    lam_vals[upper_mask] = args.lam_high
+
+    mid_u = u[mid_mask]
+    frac = (mid_u - args.ulow)/(args.uhigh - args.ulow)  # in [0,1]
+    lam_vals[mid_mask] = args.lam_low + frac*(args.lam_high - args.lam_low)
+
+    return lam_vals.unsqueeze(1)  # shape [N,1]
+
 def train_cheq(args: CHEQArgs):
+    # Seeding
     random.seed(args.seed)
+    np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if args.torch_deterministic:
         torch.backends.cudnn.deterministic = True
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     run_name = args.exp_name or "cheq_experiment"
     run_name = f"{args.env_id}__{run_name}__{args.seed}__{int(time.time())}"
 
+    # Create vectorized train / eval env
     env_kwargs = dict(
         obs_mode=args.obs_mode,
         render_mode=args.render_mode,
@@ -277,23 +301,28 @@ def train_cheq(args: CHEQArgs):
         control_mode=args.control_mode,
         reconfiguration_freq=args.reconfiguration_freq
     )
+
     train_env = gym.make(
         args.env_id,
-        robot_uids = "xarm6_pandagripper",
+        robot_uids="xarm6_pandagripper",
         num_envs=args.num_envs if not args.evaluate else 1,
+        max_episode_steps=args.env_horizon,
         **env_kwargs
     )
     eval_env = gym.make(
         args.env_id,
-        robot_uids = "xarm6_pandagripper",
+        robot_uids="xarm6_pandagripper",
         num_envs=args.num_eval_envs,
+        max_episode_steps=args.env_horizon,
         **env_kwargs
     )
 
+    # Flatten
     if isinstance(train_env.action_space, gym.spaces.Dict):
         train_env = FlattenActionSpaceWrapper(train_env)
         eval_env  = FlattenActionSpaceWrapper(eval_env)
 
+    # Recording
     if args.capture_video or args.save_trajectory:
         video_dir = f"runs/{run_name}/videos"
         if args.evaluate and args.checkpoint is not None:
@@ -309,12 +338,13 @@ def train_cheq(args: CHEQArgs):
         )
 
     train_env = ManiSkillVectorEnv(train_env, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
-    eval_env  = ManiSkillVectorEnv(eval_env,  args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
+    eval_env  = ManiSkillVectorEnv(eval_env, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
 
     original_obs_dim = np.prod(train_env.single_observation_space.shape)
     obs_dim_plus_1   = original_obs_dim + 1
     act_dim          = np.prod(train_env.single_action_space.shape)
 
+    # RL actor & ensemble Q
     actor = ActorWithLambda(obs_dim_plus_1, act_dim).to(device)
     actor.configure_action_scale(train_env.single_action_space)
 
@@ -335,20 +365,22 @@ def train_cheq(args: CHEQArgs):
         alpha = args.alpha
         log_alpha = None
 
+    # Load BC prior if provided
     prior_actor = None
     if args.prior_ckpt:
-        prior_actor = ActorPriorNoLambda(original_obs_dim, act_dim).to(device)
+        prior_actor = ActorPriorBC(original_obs_dim, act_dim).to(device)
         prior_actor.configure_action_scale(train_env.single_action_space)
-        prior_ckpt = torch.load(args.prior_ckpt, map_location=device)
-        if 'actor' in prior_ckpt:
-            current_state = prior_actor.state_dict()
-            loaded_state = prior_ckpt['actor']
-            current_state.update({k: v for k, v in loaded_state.items() if k in current_state})
-            prior_actor.load_state_dict(current_state)
-            print(f"[CHEQ] Loaded prior from {args.prior_ckpt}")
+        ckpt = torch.load(args.prior_ckpt, map_location=device)
+        if "actor" in ckpt:
+            try:
+                prior_actor.load_state_dict(ckpt["actor"], strict=True)
+            except RuntimeError:
+                prior_actor.load_state_dict(ckpt["actor"], strict=False)
+            print(f"[CHEQ] Loaded BC prior from {args.prior_ckpt}")
         else:
-            print(f"[CHEQ] Warning: No 'actor' key found in checkpoint {args.prior_ckpt}")
+            print(f"[CHEQ] No 'actor' key found in {args.prior_ckpt}")
 
+    # Replay buffer
     rb = BernoulliMaskReplayBuffer(
         buffer_size=args.buffer_size,
         obs_dim_plus_1=obs_dim_plus_1,
@@ -358,21 +390,55 @@ def train_cheq(args: CHEQArgs):
         device=device
     )
 
-    def compute_uncertainty(obs_aug, pi_act):
-        with torch.no_grad():
-            qs = [qf(obs_aug, pi_act) for qf in qfs]
-            qs_cat = torch.cat(qs, dim=1)
-            return qs_cat.std(dim=1)
+    @torch.no_grad()
+    def compute_uncertainty(obs_plus_lambda, action_rl):
+        qs = [qf(obs_plus_lambda, action_rl) for qf in qfs]
+        qs_cat = torch.cat(qs, dim=1)
+        return qs_cat.std(dim=1)  # shape [N]
 
-    def get_lambda(u):
-        if u <= args.ulow:
-            return args.lam_low
-        elif u >= args.uhigh:
-            return args.lam_high
-        else:
-            frac = (u - args.ulow)/(args.uhigh - args.ulow)
-            return args.lam_low + frac*(args.lam_high - args.lam_low)
+    # Evaluation
+    def do_evaluation(step_num: int):
+        actor.eval()
+        if prior_actor is not None:
+            prior_actor.eval()
 
+        eval_obs, _ = eval_env.reset()
+        ret = torch.zeros(args.num_eval_envs, dtype=torch.float32, device=device)
+
+        for _ in range(args.num_eval_steps):
+            with torch.no_grad():
+                lam_ones = torch.ones((args.num_eval_envs, 1), device=device)
+                obs_aug_eval = inject_weight_into_state(eval_obs, lam_ones)
+                pi_eval_act, _, _ = actor.get_action(obs_aug_eval, deterministic=True)
+
+                stdvals = compute_uncertainty(obs_aug_eval, pi_eval_act)  # shape [N]
+                lam_eval = get_lambda(stdvals, args)                      # shape [N,1]
+
+                if prior_actor is not None:
+                    plain_obs_eval = remove_lambda_dimension(obs_aug_eval)
+                    bc_act, _, _ = prior_actor.get_action(plain_obs_eval, deterministic=True)
+                else:
+                    bc_act = torch.zeros_like(pi_eval_act)
+
+                final_eval_action = lam_eval * pi_eval_act + (1 - lam_eval) * bc_act
+
+            next_obs, rew, done, trunc, infos = eval_env.step(final_eval_action)
+            ret += rew
+            eval_obs = next_obs
+
+        mean_ret = ret.mean().item()
+        # Log to TB & wandb
+        if writer:
+            writer.add_scalar("eval/return", mean_ret, step_num)
+        if args.track:
+            wandb.log({"eval/return": mean_ret}, step=step_num)
+
+        actor.train()
+        if prior_actor is not None:
+            prior_actor.train()
+        return mean_ret
+
+    # Tracking
     if args.track:
         wandb.init(
             project=args.wandb_project_name,
@@ -382,105 +448,89 @@ def train_cheq(args: CHEQArgs):
         )
     writer = SummaryWriter(f"runs/{run_name}") if not args.evaluate else None
 
-    obs_t, _ = train_env.reset(seed=args.seed)
-
+    obs, _ = train_env.reset(seed=args.seed)
     global_step = 0
     start_time = time.time()
     learning_starts_actor = args.learning_starts_actor or args.learning_starts
 
-    def do_evaluation(step_num: int):
-      actor.eval()
-      if prior_actor:
-          prior_actor.eval()
-
-      eval_obs_t, _ = eval_env.reset()
-      ret = torch.zeros(args.num_eval_envs, dtype=torch.float32, device=device)  # Ensure ret is on the same device
-
-      for _eval_step in range(args.num_eval_steps):
-          obs_aug_eval = inject_weight_into_state(eval_obs_t, lam=1.0)
-          with torch.no_grad():
-              pi_eval_act, _, _ = actor.get_action(obs_aug_eval, deterministic=True)
-          stdvals = compute_uncertainty(obs_aug_eval, pi_eval_act)
-          lam_eval = get_lambda(stdvals.mean().item())
-          prior_act = None
-          if prior_actor is not None:
-              pure_obs_eval = remove_lambda_dimension(obs_aug_eval)
-              prior_act, _, _ = prior_actor.get_action(pure_obs_eval, deterministic=True)
-          else:
-              prior_act = torch.zeros_like(pi_eval_act)
-          final_eval_action = lam_eval * pi_eval_act + (1 - lam_eval) * prior_act
-
-          next_eval_obs_t, rew_t, done_t, trunc_t, infos = eval_env.step(final_eval_action)
-
-          # Accumulate rewards
-          ret += rew_t  # Both ret and rew_t are on the same device now
-          eval_obs_t = next_eval_obs_t
-
-      mean_ret = ret.mean().item()
-      if writer:
-          writer.add_scalar("eval/return", mean_ret, step_num)
-      if args.track:
-          wandb.log({"eval/return": mean_ret}, step=step_num)
-
-      actor.train()
-      if prior_actor:
-          prior_actor.train()
-      return mean_ret
-
-
+    # Main Loop
     for step in tqdm.trange(args.total_timesteps // args.num_envs):
         global_step += args.num_envs
 
-        lam_temp = 1.0 if (global_step >= args.learning_starts) else 0.0
-        obs_aug = inject_weight_into_state(obs_t, lam_temp)
-
+        # 1) RL actor or random
         if global_step >= args.learning_starts or not args.start_random:
+            lam_ones = torch.ones((args.num_envs, 1), device=device)
+            obs_aug_input = torch.cat([obs, lam_ones], dim=1)
             with torch.no_grad():
-                pi_action, _, _ = actor.get_action(obs_aug, deterministic=False)
+                pi_action, _, _ = actor.get_action(obs_aug_input, deterministic=False)
         else:
-            pi_action = torch.tensor(train_env.action_space.sample(), dtype=torch.float32, device=device)
+            rand_action_np = train_env.action_space.sample()  # shape (num_envs, act_dim)
+            pi_action = torch.tensor(rand_action_np, dtype=torch.float32, device=device)
 
+        # 2) BC prior
         if prior_actor is not None:
-            plain_s = remove_lambda_dimension(obs_aug)
             with torch.no_grad():
-                prior_act, _, _ = prior_actor.get_action(plain_s, deterministic=True)
+                bc_action, _, _ = prior_actor.get_action(obs, deterministic=True)
         else:
-            prior_act = torch.zeros_like(pi_action, device=device)
+            bc_action = torch.zeros_like(pi_action, device=device)
 
+        # 3) Uncertainty => lam
         if global_step < args.learning_starts:
-            lam_actual = 0.0
+            lam_vec = torch.zeros((args.num_envs, 1), device=device)  # pure BC at start
         else:
-            stdvals = compute_uncertainty(obs_aug, pi_action)
-            lam_actual = get_lambda(stdvals.mean().item())
+            with torch.no_grad():
+                stdvals = compute_uncertainty(obs_aug_input, pi_action)
+                lam_vec = get_lambda(stdvals, args)
 
-        final_action = lam_actual * pi_action + (1 - lam_actual) * prior_act
+        # 4) Final action mix
+        final_action = lam_vec * pi_action + (1 - lam_vec) * bc_action
 
-        next_obs_t, rew_t, done_t, trunc_t, infos = train_env.step(final_action)
+        # 5) Step environment
+        next_obs, reward, done, trunc, infos = train_env.step(final_action)
 
-        obs_aug_true = inject_weight_into_state(obs_t, lam_actual)
-        next_obs_aug_true = inject_weight_into_state(next_obs_t, lam_actual)
+        # 6) Store transitions
+        obs_aug_store     = torch.cat([obs, lam_vec], dim=1)
+        next_obs_aug_store= torch.cat([next_obs, lam_vec], dim=1)
 
-        rb.add(
-            obs_aug_true[0],
-            next_obs_aug_true[0],
-            pi_action[0],
-            rew_t[0].unsqueeze(0),
-            (done_t[0] | trunc_t[0]).float().unsqueeze(0),
-        )
+        for i in range(args.num_envs):
+            rb.add(
+                obs_aug_store[i],
+                next_obs_aug_store[i],
+                pi_action[i],
+                reward[i].unsqueeze(0),
+                (done[i] | trunc[i]).float().unsqueeze(0)
+            )
 
-        obs_t = next_obs_t
+        obs = next_obs
 
+        # -- Logging immediate rollout info --
+        mean_rew = reward.mean().item()
+        lam_mean = lam_vec.mean().item()
+        if args.track:
+            wandb.log({"rollout/mean_reward": mean_rew,
+                       "rollout/lambda_mean":   lam_mean},
+                      step=global_step)
+        # We'll only do TB logging occasionally:
+        if writer and (global_step % args.log_freq == 0):
+            writer.add_scalar("rollout/mean_reward", mean_rew, global_step)
+            writer.add_scalar("rollout/lambda_mean", lam_mean, global_step)
+            writer.add_scalar("time/elapsed", time.time() - start_time, global_step)
+
+        # 7) Training
         if global_step >= args.learning_starts:
             for _ in range(args.grad_steps_per_iteration):
                 batch = rb.sample(args.batch_size)
+
+                # Q update
                 with torch.no_grad():
                     next_pi, next_logp, _ = actor.get_action(batch.next_obs)
-                    q_targets = []
-                    for qtarg in qfs_target:
-                        q_targets.append(qtarg(batch.next_obs, next_pi))
-                    q_cat = torch.cat(q_targets, dim=1)
+                    q_tgts = [qf_t(batch.next_obs, next_pi) for qf_t in qfs_target]
+                    q_cat = torch.cat(q_tgts, dim=1)
                     min_qt = q_cat.min(dim=1, keepdim=True).values
-                    y = batch.rewards.flatten() + (1 - batch.dones.flatten())*args.gamma*(min_qt.view(-1) - alpha*next_logp.view(-1))
+
+                    y = batch.rewards.flatten() \
+                      + (1 - batch.dones.flatten()) * args.gamma \
+                        * (min_qt.view(-1) - alpha*next_logp.view(-1))
 
                 q_loss_total = 0.0
                 for j, qf_main in enumerate(qfs):
@@ -489,30 +539,46 @@ def train_cheq(args: CHEQArgs):
                     mse_j = (q_est - y)**2 * mask_j
                     q_loss_j = mse_j.sum()/(mask_j.sum() + 1e-6)
                     q_loss_total += q_loss_j
+
                 q_optimizer.zero_grad()
                 q_loss_total.backward()
                 q_optimizer.step()
 
+                # Optionally log Q-loss each step
+                q_loss_val = q_loss_total.item()
+                if args.track:
+                    wandb.log({"train/q_loss": q_loss_val}, step=global_step)
+                if writer and (global_step % args.log_freq == 0):
+                    writer.add_scalar("train/q_loss", q_loss_val, global_step)
+
+                # Polyak update
                 if global_step % args.target_network_frequency == 0:
                     for q_main, q_targ in zip(qfs, qfs_target):
                         for p_m, p_t in zip(q_main.parameters(), q_targ.parameters()):
-                            p_t.data.copy_(args.tau*p_m.data + (1-args.tau)*p_t.data)
+                            p_t.data.copy_(args.tau*p_m.data + (1 - args.tau)*p_t.data)
 
-            # actor update
-            if global_step >= (learning_starts_actor) and (global_step % args.policy_frequency == 0):
+            # Actor update
+            if global_step >= learning_starts_actor and (global_step % args.policy_frequency == 0):
                 data2 = rb.sample(args.batch_size)
                 pi2, logp2, _ = actor.get_action(data2.obs)
-                all_q_vals = []
-                for qf_m in qfs:
-                    all_q_vals.append(qf_m(data2.obs, pi2))
+
+                all_q_vals = [qf_m(data2.obs, pi2) for qf_m in qfs]
                 cat_q_vals = torch.cat(all_q_vals, dim=1)
                 min_q_pi = cat_q_vals.min(dim=1, keepdim=True).values
-                policy_loss = (alpha*logp2 - min_q_pi).mean()
+                policy_loss = (alpha * logp2 - min_q_pi).mean()
 
                 actor_optimizer.zero_grad()
                 policy_loss.backward()
                 actor_optimizer.step()
 
+                # Log policy loss
+                policy_loss_val = policy_loss.item()
+                if args.track:
+                    wandb.log({"train/policy_loss": policy_loss_val}, step=global_step)
+                if writer and (global_step % args.log_freq == 0):
+                    writer.add_scalar("train/policy_loss", policy_loss_val, global_step)
+
+                # alpha autotune
                 if args.autotune:
                     with torch.no_grad():
                         _, logp3, _ = actor.get_action(data2.obs)
@@ -522,24 +588,25 @@ def train_cheq(args: CHEQArgs):
                     a_optimizer.step()
                     alpha = log_alpha.exp().item()
 
-        if writer is not None and (global_step % args.log_freq == 0):
-            writer.add_scalar("rollout/lambda", lam_actual, global_step)
-            writer.add_scalar("time/elapsed", time.time() - start_time, global_step)
+                    # Log alpha
+                    if args.track:
+                        wandb.log({"train/alpha": alpha}, step=global_step)
+                    if writer and (global_step % args.log_freq == 0):
+                        writer.add_scalar("train/alpha", alpha, global_step)
 
-        if not args.evaluate and global_step % args.eval_freq == 0:
-            eval_return = do_evaluation(global_step)
-            print(f"[Eval @ Step {global_step}] Return: {eval_return:.3f}")
+        # Evaluate
+        if (not args.evaluate) and (global_step % args.eval_freq == 0):
+            eval_ret = do_evaluation(global_step)
+            print(f"[Eval @ Step {global_step}] Return: {eval_ret:.3f}")
 
         if global_step >= args.total_timesteps:
             break
 
+    # Save final
     if not args.evaluate and args.save_model:
         os.makedirs(f"runs/{run_name}/checkpoints", exist_ok=True)
         ckpt_path = f"runs/{run_name}/checkpoints/cheq_final.pt"
-        torch.save({
-            'actor': actor.state_dict(),
-            # optionally qfs, alpha, etc.
-        }, ckpt_path)
+        torch.save({"actor": actor.state_dict()}, ckpt_path)
         print(f"[CHEQ] Saved final model to {ckpt_path}")
 
     train_env.close()
@@ -549,9 +616,6 @@ def train_cheq(args: CHEQArgs):
     if args.track:
         wandb.finish()
 
-# 6) Entry point
 if __name__ == "__main__":
     args = tyro.cli(CHEQArgs)
     train_cheq(args)
-
-
