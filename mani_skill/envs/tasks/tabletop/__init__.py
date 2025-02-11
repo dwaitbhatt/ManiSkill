@@ -16,3 +16,4 @@ from .place_sphere import PlaceSphereEnv
 from .place_cube import PlaceCubeEnv
 from .roll_ball import RollBallEnv
 from .push_t import PushTEnv
+from .pull_cube_tool import PullCubeToolEnv

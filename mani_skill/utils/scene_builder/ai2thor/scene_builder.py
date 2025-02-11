@@ -164,6 +164,7 @@ class AI2THORBaseSceneBuilder(SceneBuilder):
             builder.add_visual_from_file(bg_path, pose=bg_pose)
             builder.add_nonconvex_collision_from_file(bg_path, pose=bg_pose)
             builder.set_scene_idxs(env_idx)
+            builder.initial_pose = sapien.Pose()
             bg = builder.build_static(name=f"{unique_id}_scene_background")
             for i, env_num in enumerate(env_idx):
                 bgs[env_num] = bg._objs[i]
@@ -203,10 +204,9 @@ class AI2THORBaseSceneBuilder(SceneBuilder):
                         object["translation"][1] + 0,
                     ]
                     pose = sapien.Pose(p=position, q=q)
-                    builder.add_visual_from_file(str(model_path), pose=pose)
-                    builder.add_nonconvex_collision_from_file(
-                        str(model_path), pose=pose
-                    )
+                    builder.add_visual_from_file(str(model_path))
+                    builder.add_nonconvex_collision_from_file(str(model_path))
+                    builder.initial_pose = pose
                     builder.set_scene_idxs(env_idx)
                     actor = builder.build_static(name=f"{unique_id}_{actor_name}")
                 else:
@@ -220,10 +220,11 @@ class AI2THORBaseSceneBuilder(SceneBuilder):
                         str(model_path),
                         decomposition=convex_decomposition,
                     )
+                    pose = sapien.Pose(p=position, q=q)
+                    builder.initial_pose = pose
                     builder.set_scene_idxs(env_idx)
                     actor = builder.build(name=f"{unique_id}_{actor_name}")
 
-                    pose = sapien.Pose(p=position, q=q)
                     self._default_object_poses.append((actor, pose))
 
                     for env_num in env_idx:
