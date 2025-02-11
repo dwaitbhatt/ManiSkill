@@ -20,7 +20,7 @@ from tests.utils import (
 
 @pytest.mark.parametrize("env_id", ENV_IDS)
 def test_all_envs(env_id):
-    env = gym.make(env_id, obs_mode="state")
+    env = gym.make(env_id)
     obs, _ = env.reset()
     action_space = env.action_space
     for _ in range(5):
@@ -36,7 +36,7 @@ def test_envs_obs_modes(env_id, obs_mode):
     env = CPUGymWrapper(env)
     obs, _ = env.reset()
     assert_isinstance(obs, [np.ndarray, bool, float, int])
-
+    PREPROCESSED_OBS_MODES = ["pointcloud"]
     action_space = env.action_space
     for _ in range(5):
         obs, rew, terminated, truncated, info = env.step(action_space.sample())
@@ -45,28 +45,52 @@ def test_envs_obs_modes(env_id, obs_mode):
         assert_isinstance(terminated, bool)
         assert_isinstance(truncated, bool)
         assert_isinstance(info, [np.ndarray, bool, float, int])
-        if obs_mode == "rgbd":
-            for cam in obs["sensor_data"].keys():
-                assert obs["sensor_data"][cam]["rgb"].shape == (128, 128, 3)
-                assert obs["sensor_data"][cam]["depth"].shape == (128, 128, 1)
-                assert obs["sensor_data"][cam]["depth"].dtype == np.int16
-                assert obs["sensor_param"][cam]["extrinsic_cv"].shape == (3, 4)
-                assert obs["sensor_param"][cam]["intrinsic_cv"].shape == (3, 3)
-                assert obs["sensor_param"][cam]["cam2world_gl"].shape == (4, 4)
-        elif obs_mode == "pointcloud":
-            num_pts = len(obs["pointcloud"]["xyzw"])
-            assert obs["pointcloud"]["xyzw"].shape == (num_pts, 4)
-            assert obs["pointcloud"]["rgb"].shape == (num_pts, 3)
-            assert obs["pointcloud"]["segmentation"].shape == (num_pts, 1)
-            assert obs["pointcloud"]["segmentation"].dtype == np.int16
-        elif obs_mode == "rgb":
-            for cam in obs["sensor_data"].keys():
-                assert obs["sensor_data"][cam]["rgb"].shape == (128, 128, 3)
-                assert obs["sensor_param"][cam]["extrinsic_cv"].shape == (3, 4)
-        elif obs_mode == "depth+segmentation":
-            for cam in obs["sensor_data"].keys():
-                assert obs["sensor_data"][cam]["depth"].shape == (128, 128, 1)
-                assert obs["sensor_data"][cam]["segmentation"].shape == (128, 128, 1)
+        if obs_mode in PREPROCESSED_OBS_MODES:
+            if obs_mode == "pointcloud":
+                num_pts = len(obs["pointcloud"]["xyzw"])
+                assert obs["pointcloud"]["xyzw"].shape == (num_pts, 4)
+                assert obs["pointcloud"]["rgb"].shape == (num_pts, 3)
+                assert obs["pointcloud"]["segmentation"].shape == (num_pts, 1)
+                assert obs["pointcloud"]["segmentation"].dtype == np.int16
+        else:
+            if env.base_env.obs_mode_struct.visual.rgb:
+                for cam in obs["sensor_data"].keys():
+                    assert obs["sensor_data"][cam]["rgb"].shape == (128, 128, 3)
+                    assert obs["sensor_param"][cam]["extrinsic_cv"].shape == (3, 4)
+                    assert obs["sensor_param"][cam]["intrinsic_cv"].shape == (3, 3)
+                    assert obs["sensor_param"][cam]["cam2world_gl"].shape == (4, 4)
+            if env.base_env.obs_mode_struct.visual.depth:
+                for cam in obs["sensor_data"].keys():
+                    assert obs["sensor_data"][cam]["depth"].shape == (128, 128, 1)
+                    assert obs["sensor_data"][cam]["depth"].dtype == np.int16
+                    assert obs["sensor_param"][cam]["extrinsic_cv"].shape == (3, 4)
+                    assert obs["sensor_param"][cam]["intrinsic_cv"].shape == (3, 3)
+                    assert obs["sensor_param"][cam]["cam2world_gl"].shape == (4, 4)
+            if env.base_env.obs_mode_struct.visual.segmentation:
+                for cam in obs["sensor_data"].keys():
+                    assert obs["sensor_data"][cam]["segmentation"].shape == (
+                        128,
+                        128,
+                        1,
+                    )
+                    assert obs["sensor_data"][cam]["segmentation"].dtype == np.int16
+        # check state data is valid
+        if env.base_env.obs_mode_struct.state:
+            if isinstance(obs, dict):
+                assert len(obs["state"].shape) == 1
+            else:
+                assert len(obs.shape) == 1
+        if env.base_env.obs_mode_struct.state_dict:
+            assert isinstance(obs, dict)
+            assert "agent" in obs
+            assert "extra" in obs
+        assert (
+            env.base_env.obs_mode_struct.state
+            or env.base_env.obs_mode_struct.state_dict
+        ) or (
+            env.base_env.obs_mode_struct.state is False
+            and env.base_env.obs_mode_struct.state_dict is False
+        )
     env.close()
     del env
 
@@ -141,7 +165,9 @@ def test_env_seeded_reset():
 
 def test_env_seeded_sequence_reset():
     N = 17
-    env = gym.make(STATIONARY_ENV_IDS[0], max_episode_steps=5)
+    env = gym.make(
+        STATIONARY_ENV_IDS[0], max_episode_steps=5, enhanced_determinism=True
+    )
     obs, _ = env.reset(seed=2000)
     actions = [env.action_space.sample() for _ in range(N)]
     for i in range(N):

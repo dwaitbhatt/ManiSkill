@@ -94,11 +94,13 @@ class BaseDigitalTwinEnv(BaseEnv):
         for camera_name in self.rgb_overlay_paths.keys():
             sensor = self._sensor_configs[camera_name]
             if isinstance(sensor, CameraConfig):
+                if isinstance(self._rgb_overlay_images[camera_name], torch.Tensor):
+                    continue
                 rgb_overlay_img = cv2.resize(
                     self._rgb_overlay_images[camera_name], (sensor.width, sensor.height)
                 )
                 self._rgb_overlay_images[camera_name] = common.to_tensor(
-                    rgb_overlay_img
+                    rgb_overlay_img, device=self.device
                 )
 
     def _green_sceen_rgb(self, rgb, segmentation, overlay_img):
@@ -138,7 +140,11 @@ class BaseDigitalTwinEnv(BaseEnv):
         obs = super().get_obs(info)
 
         # "greenscreen" process
-        if self._obs_mode == "rgb+segmentation" and self.rgb_overlay_paths is not None:
+        if (
+            self.obs_mode_struct.visual.rgb
+            and self.obs_mode_struct.visual.segmentation
+            and self.rgb_overlay_paths is not None
+        ):
             # get the actor ids of objects to manipulate; note that objects here are not articulated
             for camera_name in self._rgb_overlay_images.keys():
                 # obtain overlay mask based on segmentation info
