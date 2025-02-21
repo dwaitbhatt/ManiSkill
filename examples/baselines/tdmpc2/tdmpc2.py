@@ -144,7 +144,7 @@ class TDMPC2:
 			else:
 				mean[:, :-1] = self._prev_mean[:, 1:]
 		actions = torch.empty(num_envs, self.cfg.horizon, self.cfg.num_samples, 
-						self.cfg.action_dim, device=self.device) # # (num_envs, horizon, num_samples, latent_dim)
+						self.cfg.action_dim, device=self.device) # # (num_envs, horizon, num_samples, action_dim)
 		if self.cfg.num_pi_trajs > 0:
 			actions[:, :, :self.cfg.num_pi_trajs] = pi_actions
 	

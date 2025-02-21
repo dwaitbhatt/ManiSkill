@@ -96,6 +96,12 @@ class Buffer():
 		return self._num_eps
 
 	def sample(self):
-		"""Sample a batch of subsequences from the buffer."""
+		"""Sample a batch of subsequences from the buffer.
+		   Returns:
+			obs (torch.Tensor): (horizon+1, batch_size, obs_dim)
+			action (torch.Tensor): (horizon, batch_size, action_dim)
+			reward (torch.Tensor): (horizon, batch_size, 1)
+			task (torch.Tensor): (batch_size, 1)
+		"""
 		td = self._buffer.sample().view(-1, self.cfg.horizon+1).permute(1, 0)
 		return self._prepare_batch(td)

@@ -6,6 +6,8 @@ class RunningScale:
 
 	def __init__(self, cfg):
 		self.cfg = cfg
+		# Value tracks the range of values as defined by difference between the 95th percentile and 
+		# 5th percentile values of the input tensor
 		self._value = torch.ones(1, dtype=torch.float32, device=torch.device('cuda'))
 		self._percentiles = torch.tensor([5, 95], dtype=torch.float32, device=torch.device('cuda'))
 
@@ -21,6 +23,9 @@ class RunningScale:
 		return self._value.cpu().item()
 
 	def _percentile(self, x):
+		'''
+		Return the (interpolated) 5th and 95th percentile values of the input tensor.
+		'''
 		x_dtype, x_shape = x.dtype, x.shape
 		x = x.view(x.shape[0], -1)
 		in_sorted, _ = torch.sort(x, dim=0)
