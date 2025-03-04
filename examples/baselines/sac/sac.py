@@ -21,7 +21,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import tyro
-from tqdm.auto import tqdm
 
 import mani_skill.envs
 
@@ -48,8 +47,6 @@ class Args:
     """the entity (team) of wandb's project"""
     wandb_group: str = "SAC"
     """the group of the run for wandb"""
-    capture_video: bool = True
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_trajectory: bool = False
     """whether to save trajectory data into the `videos` folder"""
     save_model: bool = True
@@ -64,8 +61,6 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     wandb_video_freq: int = 0
     """frequency to log videos to wandb in terms of environment steps (multiple of eval_freq)"""
-    save_model: bool = True
-    """whether to save the model checkpoints"""
     save_model_dir: Optional[str] = "runs"
     """the directory to save the model"""
 
@@ -428,9 +423,7 @@ if __name__ == "__main__":
     pbar = tqdm.tqdm(range(args.total_timesteps))
     cumulative_times = defaultdict(float)
 
-    pbar = tqdm(total=args.total_timesteps, desc="Training SAC")
     while global_step < args.total_timesteps:
-        pbar.update(global_steps_per_iteration)
         if args.eval_freq > 0 and (global_step - args.training_freq) // args.eval_freq < global_step // args.eval_freq:
             # evaluate
             actor.eval()
