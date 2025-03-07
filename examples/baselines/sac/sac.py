@@ -1,4 +1,3 @@
-
 from collections import defaultdict
 from dataclasses import dataclass
 import os
@@ -60,7 +59,9 @@ class Args:
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     wandb_video_freq: int = 0
-    """frequency to log videos to wandb in terms of environment steps (multiple of eval_freq)"""
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
+    wandb_reward_trajectories: bool = False
+    """whether to upload reward trajectories to wandb (to help with reward engineering)"""
     save_model_dir: Optional[str] = "runs"
     """the directory to save the model"""
 
@@ -161,30 +162,16 @@ class ReplayBuffer:
     def clean_samples(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor):
         # Find row indices where any of the tensors are nan or too large
         nan_mask = torch.isnan(obs).any(dim=1) | torch.isnan(next_obs).any(dim=1) | torch.isnan(action).any(dim=1)
-        large_mask = (obs > 1e4).any(dim=1) | (next_obs > 1e4).any(dim=1) | (action > 1e4).any(dim=1)
+        large_mask = (obs.abs() > 1e4).any(dim=1) | (next_obs.abs() > 1e4).any(dim=1) | (action.abs() > 1e4).any(dim=1)
         nan_or_large_indices = torch.where(nan_mask | large_mask)[0]
         if len(nan_or_large_indices) > 0:
-            # print(f"NaN or large value detected: {len(nan_or_large_indices)} transitions converted to zero")
+            print(f"WARNING: {len(nan_or_large_indices)} transitions with NaN or large values detected and zeroed")
             obs[nan_or_large_indices] = 0
             next_obs[nan_or_large_indices] = 0
             action[nan_or_large_indices] = 0
             reward[nan_or_large_indices] = 0
             done[nan_or_large_indices] = 0
-        return obs, next_obs, action, reward, done            
-
-    def clean_samples(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor):
-        # Find row indices where any of the tensors are nan or too large
-        nan_mask = torch.isnan(obs).any(dim=1) | torch.isnan(next_obs).any(dim=1) | torch.isnan(action).any(dim=1)
-        large_mask = (obs > 1e4).any(dim=1) | (next_obs > 1e4).any(dim=1) | (action > 1e4).any(dim=1)
-        nan_or_large_indices = torch.where(nan_mask | large_mask)[0]
-        if len(nan_or_large_indices) > 0:
-            # print(f"NaN or large value detected: {len(nan_or_large_indices)} transitions converted to zero")
-            obs[nan_or_large_indices] = 0
-            next_obs[nan_or_large_indices] = 0
-            action[nan_or_large_indices] = 0
-            reward[nan_or_large_indices] = 0
-            done[nan_or_large_indices] = 0
-        return obs, next_obs, action, reward, done            
+        return obs, next_obs, action, reward, done
 
     def add(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor):
         if self.storage_device == torch.device("cpu"):
@@ -343,7 +330,7 @@ if __name__ == "__main__":
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
             envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
-        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq//args.eval_freq)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -411,6 +398,8 @@ if __name__ == "__main__":
         sample_device=device
     )
 
+    # Add these lines after optimizer definitions
+    max_grad_norm = 1.0  # Adjust this value as needed
 
     # TRY NOT TO MODIFY: start the game
     obs, info = envs.reset(seed=args.seed) # in Gymnasium, seed is given to reset() instead of seed()
@@ -431,14 +420,68 @@ if __name__ == "__main__":
             eval_obs, _ = eval_envs.reset()
             eval_metrics = defaultdict(list)
             num_episodes = 0
-            for _ in range(args.num_eval_steps):
-                with torch.no_grad():
-                    eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor.get_eval_action(eval_obs))
-                    if "final_info" in eval_infos:
-                        mask = eval_infos["_final_info"]
-                        num_episodes += mask.sum()
-                        for k, v in eval_infos["final_info"]["episode"].items():
-                            eval_metrics[k].append(v)
+
+            if args.wandb_reward_trajectories:
+                # Initialize reward tracking for each environment
+                reward_trajectories = [[] for _ in range(args.num_eval_envs)]
+                episode_steps = [0] * args.num_eval_envs
+                active_envs = [True] * args.num_eval_envs
+                
+                for step in range(args.num_eval_steps):
+                    with torch.no_grad():
+                        eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor.get_eval_action(eval_obs))
+                        if "final_info" in eval_infos:
+                            mask = eval_infos["_final_info"]
+                            num_episodes += mask.sum()
+                            for k, v in eval_infos["final_info"]["episode"].items():
+                                eval_metrics[k].append(v)
+
+                        # Track rewards for each environment
+                        for env_idx in range(args.num_eval_envs):
+                            if active_envs[env_idx]:
+                                reward_trajectories[env_idx].append(eval_rew[env_idx].item())
+                                episode_steps[env_idx] += 1
+                                
+                                # Check if episode ended
+                                if eval_terminations[env_idx] or eval_truncations[env_idx]:
+                                    active_envs[env_idx] = False
+                        
+                # Log reward trajectories
+                if logger is not None and logger.log_wandb:
+                    # Group data by environment
+                    xs_by_env = []
+                    ys_by_env = []
+                    keys = []
+                    
+                    # Find top 4 trajectories with highest mean reward
+                    reward_trajectories_sorted = sorted(reward_trajectories, key=lambda x: np.mean(x), reverse=True)
+                    reward_trajectories_sorted = reward_trajectories_sorted[:4]
+                    for env_idx, rewards in enumerate(reward_trajectories_sorted):
+                        if len(rewards) > 0:  # Only include environments with data
+                            xs_by_env.append(list(range(len(rewards))))  # Steps for this env
+                            ys_by_env.append(rewards)  # Rewards for this env
+                            keys.append(f"env_{env_idx}")  # Label for this env
+                    
+                    if keys:  # Only log if we have data
+                        # Use line_series with properly structured data
+                        wandb.log({"eval/reward_trajectories": wandb.plot.line_series(
+                            xs=xs_by_env,  # List of lists of x values
+                            ys=ys_by_env,  # List of lists of y values
+                            keys=keys,     # List of labels
+                            title="Reward Trajectories",
+                            xname="Step")}, 
+                            step=global_step)
+                        
+            else:
+                for _ in range(args.num_eval_steps):
+                    with torch.no_grad():
+                        eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor.get_eval_action(eval_obs))
+                        if "final_info" in eval_infos:
+                            mask = eval_infos["_final_info"]
+                            num_episodes += mask.sum()
+                            for k, v in eval_infos["final_info"]["episode"].items():
+                                eval_metrics[k].append(v)
+
             eval_metrics_mean = {}
             for k, v in eval_metrics.items():
                 mean = torch.stack(v).float().mean()
@@ -534,6 +577,8 @@ if __name__ == "__main__":
 
             q_optimizer.zero_grad()
             qf_loss.backward()
+            torch.nn.utils.clip_grad_norm_(qf1.parameters(), max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(qf2.parameters(), max_grad_norm)
             q_optimizer.step()
 
             # update the policy network
@@ -546,6 +591,7 @@ if __name__ == "__main__":
 
                 actor_optimizer.zero_grad()
                 actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
                 actor_optimizer.step()
 
                 if args.autotune:
