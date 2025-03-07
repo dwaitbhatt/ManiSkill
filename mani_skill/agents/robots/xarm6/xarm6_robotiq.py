@@ -36,12 +36,12 @@ class XArm6Robotiq(BaseAgent):
         rest=Keyframe(
             qpos=np.array(
                 [
-                    1.56280772e-03,
-                    -1.10912404e00,
-                    -9.71343926e-02,
-                    1.52969832e-04,
-                    1.20606723e00,
-                    1.66234924e-03,
+                    6.672368e-4,
+                    2.2206e-1,
+                    -1.2311444,
+                    1.6927806e-4,
+                    1.0088931,
+                    7.304605e-4,
                     0,
                     0,
                     0,
@@ -77,7 +77,7 @@ class XArm6Robotiq(BaseAgent):
             pose=sapien.Pose([0, 0, 0]),
         ),
         stretch_j6=Keyframe(
-            qpos=np.array([0, 0, 0, 0, 0, np.pi / 2]),
+            qpos=np.array([0, 0, 0, 0, 0, np.pi / 2, 0, 0, 0, 0, 0, 0]),
             pose=sapien.Pose([0, 0, 0]),
         ),
     )
@@ -101,6 +101,8 @@ class XArm6Robotiq(BaseAgent):
     gripper_force_limit = 0.1
     gripper_friction = 1
     ee_link_name = "eef"
+
+    active_gripper_joint_inds = [6, 8]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -379,6 +381,12 @@ class XArm6Robotiq(BaseAgent):
             self.robot.get_links(), self.ee_link_name
         )
 
+    def get_proprioception(self):
+        obs = super().get_proprioception()
+        obs["qpos"] = obs["qpos"][..., :6]
+        obs["qvel"] = obs["qvel"][..., :6]
+        return obs
+
     def is_grasping(self, object: Actor, min_force=0.5, max_angle=85):
         l_contact_forces = self.scene.get_pairwise_contact_forces(
             self.finger1_link, object
@@ -400,6 +408,31 @@ class XArm6Robotiq(BaseAgent):
             rforce >= min_force, torch.rad2deg(rangle) <= max_angle
         )
         return torch.logical_and(lflag, rflag)
+
+    @staticmethod
+    def build_grasp_pose(approaching, closing, center):
+        """Build a grasp pose ()."""
+        assert np.abs(1 - np.linalg.norm(approaching)) < 1e-3
+        assert np.abs(1 - np.linalg.norm(closing)) < 1e-3
+        assert np.abs(approaching @ closing) <= 1e-3
+        ortho = np.cross(closing, approaching)
+        T = np.eye(4)
+        T[:3, :3] = np.stack([ortho, closing, approaching], axis=1)
+        T[:3, 3] = center
+        return sapien.Pose(T)
+
+    def get_gripper_width(self):
+        """
+        Get the width of the gripper from 0 to 1
+        0 is fully closed, 1 is fully open
+        """
+        gripper_qpos_min = self.robot.get_qlimits()[0, self.active_gripper_joint_inds[0], 0]
+        gripper_qpos_max = self.robot.get_qlimits()[0, self.active_gripper_joint_inds[0], 1]
+        max_gripper_width = gripper_qpos_max - gripper_qpos_min
+        gripper_qpos = torch.mean(self.robot.get_qpos()[:, self.active_gripper_joint_inds], axis=1)
+        # For robotiq, the gripper is closed at max qpos and open at min qpos
+        gripper_width_inv = (gripper_qpos - gripper_qpos_min) / max_gripper_width
+        return 1 - gripper_width_inv
 
     def is_static(self, threshold: float = 0.2):
         qvel = self.robot.get_qvel()[..., :-6]
