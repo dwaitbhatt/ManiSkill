@@ -42,7 +42,8 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-
+    wandb_video_freq: int = 2
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
     env_id: str = "PegInsertionSide-v0"
     """the id of the environment"""
     demo_path: str = "data/ms2_official_demos/rigid_body/PegInsertionSide-v0/trajectory.state.pd_ee_delta_pose.h5"
@@ -267,6 +268,7 @@ if __name__ == "__main__":
         args.sim_backend,
         env_kwargs,
         video_dir=f"runs/{run_name}/videos" if args.capture_video else None,
+        wandb_video_freq=args.wandb_video_freq,
     )
 
     if args.track:

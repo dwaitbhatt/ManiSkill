@@ -215,7 +215,7 @@
   <joint name="panda_hand_joint" type="fixed">
     <parent link="panda_link8"/>
     <child link="panda_hand"/>
-    <origin rpy="0 0 -0.7853981633974483" xyz="0 0 0"/>
+    <origin rpy="0 0 0.7853981633974483" xyz="0 0 0"/>
   </joint>
   <link name="panda_hand">
     <visual>

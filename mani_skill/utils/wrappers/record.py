@@ -803,7 +803,7 @@ class RecordEpisode(gym.Wrapper):
                 verbose=verbose,
             )
             if self.wandb_video_freq != 0 and self._video_id % self.wandb_video_freq == 0:
-                print(f"Logging video {video_name} to wandb")
+                # print(f"Logging video {video_name} to wandb")
                 video_name = video_name.replace(" ", "_").replace("\n", "_") + ".mp4"
                 wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)})
         self._video_steps = 0
