@@ -3,11 +3,17 @@ import sapien
 
 from mani_skill.envs.tasks import PushCubeEnv
 from mani_skill.examples.motionplanning.xarm6.motionplanner import \
-    XArm6MotionPlanningSolver
+    XArm6RobotiqMotionPlanningSolver, XArm6PandaGripperMotionPlanningSolver
 
 def solve(env: PushCubeEnv, seed=None, debug=False, vis=False):
     env.reset(seed=seed)
-    planner = XArm6MotionPlanningSolver(
+    if env.unwrapped.robot_uids == "xarm6_robotiq":
+        planner_cls = XArm6RobotiqMotionPlanningSolver
+    elif env.unwrapped.robot_uids == "xarm6_pandagripper":
+        planner_cls = XArm6PandaGripperMotionPlanningSolver
+    else:
+        raise ValueError(f"Unsupported robot uid: {env.robot_uid}")
+    planner = planner_cls(
         env,
         debug=debug,
         vis=vis,

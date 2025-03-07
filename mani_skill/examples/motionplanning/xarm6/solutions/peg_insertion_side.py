@@ -4,7 +4,7 @@ import sapien
 
 from mani_skill.envs.tasks import PegInsertionSideEnv
 from mani_skill.examples.motionplanning.xarm6.motionplanner import \
-    XArm6MotionPlanningSolver
+    XArm6RobotiqMotionPlanningSolver, XArm6PandaGripperMotionPlanningSolver
 from mani_skill.examples.motionplanning.panda.utils import (
     compute_grasp_info_by_obb, get_actor_obb)
 
@@ -29,7 +29,13 @@ def solve(env: PegInsertionSideEnv, seed=None, debug=False, vis=False):
         "pd_joint_pos",
         "pd_joint_pos_vel",
     ], env.unwrapped.control_mode
-    planner = XArm6MotionPlanningSolver(
+    if env.unwrapped.robot_uids == "xarm6_robotiq":
+        planner_cls = XArm6RobotiqMotionPlanningSolver
+    elif env.unwrapped.robot_uids == "xarm6_pandagripper":
+        planner_cls = XArm6PandaGripperMotionPlanningSolver
+    else:
+        raise ValueError(f"Unsupported robot uid: {env.robot_uid}")
+    planner = planner_cls(
         env,
         debug=debug,
         vis=vis,
