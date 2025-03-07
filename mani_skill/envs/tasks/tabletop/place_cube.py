@@ -199,12 +199,14 @@ class PlaceCubeEnv(BaseEnv):
         is_obj_placed_in_bin = torch.logical_and(xy_flag, placed_in_bin_z_flag)
         is_obj_static = self.obj.is_static(lin_thresh=1e-2, ang_thresh=0.5)
         is_obj_grasped = self.agent.is_grasping(self.obj)
-        success = is_obj_placed_in_bin & is_obj_static & (~is_obj_grasped)
+        is_robot_static = self.agent.is_static(0.1)
+        success = is_obj_placed_in_bin & is_obj_static & (~is_obj_grasped) & is_robot_static
         return {
             "is_obj_grasped": is_obj_grasped,
             "is_obj_entering_bin": is_obj_entering_bin,
             "is_obj_placed_in_bin": is_obj_placed_in_bin,
             "is_obj_static": is_obj_static,
+            "is_robot_static": is_robot_static,
             "success": success,
         }
 
@@ -249,16 +251,23 @@ class PlaceCubeEnv(BaseEnv):
         ungrasp_reward = self.agent.get_gripper_width()
         ungrasp_reward[
             ~is_obj_grasped
-        ] = 16.0  # give ungrasp a bigger reward, so that it exceeds the robot static reward and the gripper can close
+        ] = 1.0
         v = torch.linalg.norm(self.obj.linear_velocity, axis=1)
         av = torch.linalg.norm(self.obj.angular_velocity, axis=1)
         static_reward = 1 - torch.tanh(v * 5 + av)
-        robot_static_reward = self.agent.is_static(
-            0.2
-        )  # keep the robot static at the end state
         reward[info["is_obj_placed_in_bin"]] = (
-            8 + (ungrasp_reward + static_reward + robot_static_reward) / 3.0
+            8 + (ungrasp_reward + static_reward) / 2.0
         )[info["is_obj_placed_in_bin"]]
+
+        # go up and stay static reward
+        robot_qvel = torch.linalg.norm(self.agent.robot.get_qvel(), axis=1)
+        robot_static_reward = 1 - torch.tanh(5.0 * robot_qvel)
+        tcp_to_bin_top_dist = torch.linalg.norm(self.agent.tcp.pose.p - self.bin.pose.p, axis=1)
+        reach_bin_top_reward = 1 - torch.tanh(5.0 * tcp_to_bin_top_dist)
+        
+        final_state = info["is_obj_placed_in_bin"] & ~info["is_obj_grasped"]
+        final_state_reward = (robot_static_reward + reach_bin_top_reward) / 2.0
+        reward[final_state] = (10 + final_state_reward)[final_state]
 
         # success reward
         reward[info["success"]] = 15
