@@ -14,11 +14,14 @@ import gymnasium as gym
 import numpy as np
 
 from mani_skill.envs.sapien_env import BaseEnv
-from mani_skill.sensors.camera import Camera
+from mani_skill.sensors.camera import Camera, CameraConfig
+from mani_skill.utils import sapien_utils
+
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--env-id", type=str, default="PushCube-v1", help="The environment ID of the task you want to simulate")
     parser.add_argument("-o", "--obs-mode", type=str, default="rgb+depth", help="Can be rgb or rgb+depth, rgb+normal, albedo+depth etc. Which ever image-like textures you want to visualize can be tacked on")
+    parser.add_argument("-r", "--robot", type=str, default="panda", help="The robot to use")
     parser.add_argument("--shader", default="default", type=str, help="Change shader used for all cameras in the environment for rendering. Default is 'minimal' which is very fast. Can also be 'rt' for ray tracing and generating photo-realistic renders. Can also be 'rt-fast' for a faster but lower quality ray-traced renderer")
     parser.add_argument("--num-envs", type=int, default=1, help="Number of environments to run. Used for some basic testing and not visualized")
     parser.add_argument("--cam-width", type=int, help="Override the width of every camera in the environment")
@@ -49,6 +52,7 @@ def main(args):
         args.env_id,
         obs_mode=args.obs_mode,
         num_envs=args.num_envs,
+        robot_uids=args.robot,
         sensor_configs=sensor_configs
     )
 

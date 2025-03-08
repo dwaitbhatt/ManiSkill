@@ -44,7 +44,7 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
         obs_mode=args.obs_mode,
         control_mode="pd_joint_pos",
         render_mode=args.render_mode,
-        robot_uids="xarm6_pandagripper",
+        robot_uids="xarm6_robotiq",
         reward_mode="dense" if args.reward_mode is None else args.reward_mode,
         sensor_configs=dict(shader_pack=args.shader),
         human_render_camera_configs=dict(shader_pack=args.shader),

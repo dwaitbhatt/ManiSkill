@@ -19,7 +19,7 @@ class Args:
     obs_mode: Annotated[str, tyro.conf.arg(aliases=["-o"])] = "none"
     """Observation mode"""
 
-    robot_uids: Annotated[Optional[str], tyro.conf.arg(aliases=["-r"])] = None
+    robot_uids: Annotated[Optional[str], tyro.conf.arg(aliases=["-r"])] = "panda"
     """Robot UID(s) to use. Can be a comma separated list of UIDs or empty string to have no agents. If not given then defaults to the environments default robot"""
 
     sim_backend: Annotated[str, tyro.conf.arg(aliases=["-b"])] = "auto"
@@ -78,6 +78,7 @@ def main(args: Args):
         sim_backend=args.sim_backend,
         enable_shadow=True,
         parallel_in_single_scene=parallel_in_single_scene,
+        robot_init_qpos_noise=0,
     )
     if args.robot_uids is not None:
         env_kwargs["robot_uids"] = tuple(args.robot_uids.split(","))
@@ -107,6 +108,7 @@ def main(args: Args):
         env.render()
     while True:
         action = env.action_space.sample() if env.action_space is not None else None
+        # action *= 0
         obs, reward, terminated, truncated, info = env.step(action)
         if verbose:
             print("reward", reward)

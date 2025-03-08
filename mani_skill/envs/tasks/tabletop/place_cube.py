@@ -8,7 +8,7 @@ import torch
 import torch.random
 from transforms3d.euler import euler2quat
 
-from mani_skill.agents.robots import Fetch, Panda, XArm6PandaGripper
+from mani_skill.agents.robots import Fetch, Panda, XArm6Robotiq
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.utils import randomization
 from mani_skill.sensors.camera import CameraConfig
@@ -36,10 +36,10 @@ class PlaceCubeEnv(BaseEnv):
     The cube is place on the top of the bin. The robot remains static and the gripper is not closed at the end state
     """
 
-    SUPPORTED_ROBOTS = ["panda", "fetch", "xarm6_pandagripper"]
+    SUPPORTED_ROBOTS = ["panda", "fetch", "xarm6_robotiq"]
 
     # Specify some supported robot types
-    agent: Union[Panda, Fetch, XArm6PandaGripper]
+    agent: Union[Panda, Fetch, XArm6Robotiq]
 
     # set some commonly used values
     cube_half_length = 0.02  # half side length of the cube
@@ -125,6 +125,7 @@ class PlaceCubeEnv(BaseEnv):
             builder.add_box_collision(pose, half_size)
             builder.add_box_visual(pose, half_size)
 
+        builder.initial_pose = sapien.Pose(p=[0, 0, 0])
         # build the kinematic bin
         return builder.build_kinematic(name="bin")
 
@@ -142,10 +143,14 @@ class PlaceCubeEnv(BaseEnv):
             color=np.array([12, 42, 160, 255]) / 255,
             name="cube",
             body_type="dynamic",
+            initial_pose=sapien.Pose(p=[0, 0, self.cube_half_length + 2*self.short_side_half_size]),
         )
 
         # load the bin
         self.bin = self._build_bin()
+
+    def _load_agent(self, options: dict):
+        super()._load_agent(options, sapien.Pose(p=[-0.5, 0, 0]))
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
@@ -184,17 +189,24 @@ class PlaceCubeEnv(BaseEnv):
         pos_bin = self.bin.pose.p
         offset = pos_obj - pos_bin
         xy_flag = torch.linalg.norm(offset[..., :2], axis=1) <= 0.005
-        z_flag = (
-            torch.abs(offset[..., 2] - self.cube_half_length - self.block_half_size[0]) <= 0.005
+        entering_bin_z_flag = (
+            offset[..., 2] - self.cube_half_length - self.short_side_half_size < 4 * self.short_side_half_size 
         )
-        is_obj_on_bin = torch.logical_and(xy_flag, z_flag)
+        placed_in_bin_z_flag = (
+            torch.abs(offset[..., 2] - self.cube_half_length - self.short_side_half_size) <= 0.005
+        )
+        is_obj_entering_bin = torch.logical_and(xy_flag, entering_bin_z_flag)
+        is_obj_placed_in_bin = torch.logical_and(xy_flag, placed_in_bin_z_flag)
         is_obj_static = self.obj.is_static(lin_thresh=1e-2, ang_thresh=0.5)
         is_obj_grasped = self.agent.is_grasping(self.obj)
-        success = is_obj_on_bin & is_obj_static & (~is_obj_grasped)
+        is_robot_static = self.agent.is_static(0.1)
+        success = is_obj_placed_in_bin & is_obj_static & (~is_obj_grasped) & is_robot_static
         return {
             "is_obj_grasped": is_obj_grasped,
-            "is_obj_on_bin": is_obj_on_bin,
+            "is_obj_entering_bin": is_obj_entering_bin,
+            "is_obj_placed_in_bin": is_obj_placed_in_bin,
             "is_obj_static": is_obj_static,
+            "is_robot_static": is_robot_static,
             "success": success,
         }
 
@@ -221,44 +233,47 @@ class PlaceCubeEnv(BaseEnv):
         # grasp and reach bin top reward
         obj_pos = self.obj.pose.p
         bin_top_pos = self.bin.pose.p.clone()
-        bin_top_pos[:, 2] = bin_top_pos[:, 2] + 2 * (self.block_half_size[0] + self.cube_half_length + 4 * self.short_side_half_size)
+        # Height of the bin wall is 4 * short_side_half_size
+        bin_top_pos[:, 2] = bin_top_pos[:, 2] + self.short_side_half_size + self.cube_half_length + 4 * self.short_side_half_size
         obj_to_bin_top_dist = torch.linalg.norm(bin_top_pos - obj_pos, axis=1)
         reach_bin_top_reward = 1 - torch.tanh(5.0 * obj_to_bin_top_dist)
         reward[info["is_obj_grasped"]] = (4 + reach_bin_top_reward)[info["is_obj_grasped"]]
-        above_bin_xy = torch.linalg.norm(bin_top_pos[:, :2] - obj_pos[:, :2], axis=1)
-        reached_above_bin = info["is_obj_grasped"] & (above_bin_xy <= self.cube_half_length/2)
 
         # reach inside bin reward
         bin_inside_pos = self.bin.pose.p.clone()
-        bin_inside_pos[:, 2] = bin_inside_pos[:, 2] + 2 * (self.block_half_size[0] + self.cube_half_length + self.short_side_half_size) + 0.01
+        bin_inside_pos[:, 2] = bin_inside_pos[:, 2] + self.short_side_half_size + self.cube_half_length + 0.01
         obj_to_bin_inside_dist = torch.linalg.norm(bin_inside_pos - obj_pos, axis=1)
         reach_bin_inside_reward = 1 - torch.tanh(5.0 * obj_to_bin_inside_dist)
-        reward[reached_above_bin] = (6 + reach_bin_inside_reward)[reached_above_bin]
+        reward[info["is_obj_entering_bin"]] = (6 + reach_bin_inside_reward)[info["is_obj_entering_bin"]]
 
         # ungrasp and static reward
-        gripper_width = (self.agent.robot.get_qlimits()[0, -1, 1] * 2).to(self.device)
         is_obj_grasped = info["is_obj_grasped"]
-        ungrasp_reward = (
-            torch.sum(self.agent.robot.get_qpos()[:, -2:], axis=1) / gripper_width
-        )
+        ungrasp_reward = self.agent.get_gripper_width()
         ungrasp_reward[
             ~is_obj_grasped
-        ] = 50.0  # give ungrasp a bigger reward, so that it exceeds the robot static reward and the gripper can close
+        ] = 1.0
         v = torch.linalg.norm(self.obj.linear_velocity, axis=1)
         av = torch.linalg.norm(self.obj.angular_velocity, axis=1)
-        static_reward = 1 - torch.tanh(v * 10 + av)
-        robot_static_reward = self.agent.is_static(
-            0.2
-        )  # keep the robot static at the end state
-        reward[info["is_obj_on_bin"]] = (
-            8 + (ungrasp_reward + static_reward + robot_static_reward) / 3.0
-        )[info["is_obj_on_bin"]]
+        static_reward = 1 - torch.tanh(v * 5 + av)
+        reward[info["is_obj_placed_in_bin"]] = (
+            8 + (ungrasp_reward + static_reward) / 2.0
+        )[info["is_obj_placed_in_bin"]]
+
+        # go up and stay static reward
+        robot_qvel = torch.linalg.norm(self.agent.robot.get_qvel(), axis=1)
+        robot_static_reward = 1 - torch.tanh(5.0 * robot_qvel)
+        tcp_to_bin_top_dist = torch.linalg.norm(self.agent.tcp.pose.p - self.bin.pose.p, axis=1)
+        reach_bin_top_reward = 1 - torch.tanh(5.0 * tcp_to_bin_top_dist)
+        
+        final_state = info["is_obj_placed_in_bin"] & ~info["is_obj_grasped"]
+        final_state_reward = (robot_static_reward + reach_bin_top_reward) / 2.0
+        reward[final_state] = (10 + final_state_reward)[final_state]
 
         # success reward
-        reward[info["success"]] = 30
+        reward[info["success"]] = 15
         return reward
 
     def compute_normalized_dense_reward(self, obs: Any, action: Array, info: Dict):
         # this should be equal to compute_dense_reward / max possible reward
-        max_reward = 13.0
+        max_reward = 15
         return self.compute_dense_reward(obs=obs, action=action, info=info) / max_reward
