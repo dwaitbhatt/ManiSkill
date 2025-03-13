@@ -279,6 +279,13 @@ class Panda(BaseAgent):
         T[:3, 3] = center
         return sapien.Pose(T)
 
+    def get_gripper_width(self):
+        gripper_qpos = torch.mean(self.robot.get_qpos()[:, -2:], axis=1)
+        gripper_qpos_min = self.robot.get_qlimits()[0, -1, 0]
+        gripper_qpos_max = self.robot.get_qlimits()[0, -1, 1]
+        gripper_width = (gripper_qpos - gripper_qpos_min) / (gripper_qpos_max - gripper_qpos_min)
+        return gripper_width
+
     # sensor_configs = [
     #     CameraConfig(
     #         uid="hand_camera",

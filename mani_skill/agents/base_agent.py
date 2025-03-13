@@ -417,3 +417,12 @@ class BaseAgent:
             True if agent is static within the threshold. False otherwise
         """
         raise NotImplementedError()
+
+    def get_gripper_width(self):
+        """
+        Get the width of the gripper from 0 to 1
+
+        Returns:
+            Gripper width between 0 and 1 - where 0 is fully closed, 1 is fully open
+        """
+        raise NotImplementedError()
