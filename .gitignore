@@ -33,9 +33,14 @@ imgui.ini
 # but can be excluded explicitly
 /tmp
 /data
-/demos
-/videos
-/examples/benchmarking/videos
+*demos*
+*videos*
+*runs*
+*wandb*
+*logs*
+*outputs*
+* copy*
+*venv*
 
 # benchmarking
 /benchmark_results

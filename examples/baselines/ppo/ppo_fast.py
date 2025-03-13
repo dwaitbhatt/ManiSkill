@@ -42,17 +42,19 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     track: bool = False
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "ManiSkill"
+    wandb_project_name: str = "maniskill_experiments"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: Optional[str] = "ucsd_erl"
     """the entity (team) of wandb's project"""
     wandb_group: str = "PPO"
     """the group of the run for wandb"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    wandb_video_freq: int = 0
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
     save_trajectory: bool = False
     """whether to save trajectory data into the `videos` folder"""
-    save_model: bool = True
+    save_model: bool = False
     """whether to save model into the `runs/{run_name}` folder"""
     evaluate: bool = False
     """if toggled, only runs evaluation with the given model checkpoint and saves the evaluation trajectories"""
@@ -62,6 +64,8 @@ class Args:
     # Environment specific arguments
     env_id: str = "PickCube-v1"
     """the id of the environment"""
+    robot_uids: str = "panda"
+    """the uid of the robot to use in the environment"""
     env_vectorization: str = "gpu"
     """the type of environment vectorization to use"""
     num_envs: int = 512
@@ -326,7 +330,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     ####### Environment setup #######
-    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="physx_cuda")
+    env_kwargs = dict(robot_uids=args.robot_uids, obs_mode="state", render_mode="rgb_array", sim_backend="physx_cuda")
     if args.control_mode is not None:
         env_kwargs["control_mode"] = args.control_mode
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
@@ -342,7 +346,7 @@ if __name__ == "__main__":
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
             envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
-        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"

@@ -1,4 +1,3 @@
-
 from collections import defaultdict
 from dataclasses import dataclass
 import os
@@ -29,6 +28,10 @@ import mani_skill.envs
 class Args:
     exp_name: Optional[str] = None
     """the name of this experiment"""
+    robot: str = "panda"
+    """which robot to use for the experiment"""
+    control_mode: str = "pd_joint_pos"
+    """which control mode to use for the experiment"""
     seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
@@ -37,14 +40,12 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     track: bool = False
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "ManiSkill"
+    wandb_project_name: str = "maniskill_experiments"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str = "ucsd_erl"
     """the entity (team) of wandb's project"""
     wandb_group: str = "SAC"
     """the group of the run for wandb"""
-    capture_video: bool = True
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_trajectory: bool = False
     """whether to save trajectory data into the `videos` folder"""
     save_model: bool = True
@@ -55,6 +56,14 @@ class Args:
     """path to a pretrained checkpoint file to start evaluation/training from"""
     log_freq: int = 1_000
     """logging frequency in terms of environment steps"""
+    capture_video: bool = True
+    """whether to capture videos of the agent performances (check out `videos` folder)"""
+    wandb_video_freq: int = 0
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
+    wandb_reward_trajectories: bool = False
+    """whether to upload reward trajectories to wandb (to help with reward engineering)"""
+    save_model_dir: Optional[str] = "runs"
+    """the directory to save the model"""
 
     # Environment specific arguments
     env_id: str = "PickCube-v1"
@@ -150,6 +159,20 @@ class ReplayBuffer:
         self.dones = torch.zeros((self.per_env_buffer_size, self.num_envs)).to(storage_device)
         self.values = torch.zeros((self.per_env_buffer_size, self.num_envs)).to(storage_device)
 
+    def clean_samples(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor):
+        # Find row indices where any of the tensors are nan or too large
+        nan_mask = torch.isnan(obs).any(dim=1) | torch.isnan(next_obs).any(dim=1) | torch.isnan(action).any(dim=1)
+        large_mask = (obs.abs() > 1e4).any(dim=1) | (next_obs.abs() > 1e4).any(dim=1) | (action.abs() > 1e4).any(dim=1)
+        nan_or_large_indices = torch.where(nan_mask | large_mask)[0]
+        if len(nan_or_large_indices) > 0:
+            print(f"WARNING: {len(nan_or_large_indices)} transitions with NaN or large values detected and zeroed")
+            obs[nan_or_large_indices] = 0
+            next_obs[nan_or_large_indices] = 0
+            action[nan_or_large_indices] = 0
+            reward[nan_or_large_indices] = 0
+            done[nan_or_large_indices] = 0
+        return obs, next_obs, action, reward, done
+
     def add(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor):
         if self.storage_device == torch.device("cpu"):
             obs = obs.cpu()
@@ -158,6 +181,7 @@ class ReplayBuffer:
             reward = reward.cpu()
             done = done.cpu()
 
+        obs, next_obs, action, reward, done = self.clean_samples(obs, next_obs, action, reward, done)
         self.obs[self.pos] = obs
         self.next_obs[self.pos] = next_obs
 
@@ -169,6 +193,7 @@ class ReplayBuffer:
         if self.pos == self.per_env_buffer_size:
             self.full = True
             self.pos = 0
+
     def sample(self, batch_size: int):
         if self.full:
             batch_inds = torch.randint(0, self.per_env_buffer_size, size=(batch_size, ))
@@ -276,7 +301,7 @@ if __name__ == "__main__":
     args.steps_per_env = args.training_freq // args.num_envs
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]
-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+        run_name = f"{args.env_id}__{args.exp_name}__{args.robot}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
 
@@ -289,7 +314,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     ####### Environment setup #######
-    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu")
+    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
     if args.control_mode is not None:
         env_kwargs["control_mode"] = args.control_mode
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
@@ -305,7 +330,7 @@ if __name__ == "__main__":
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
             envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
-        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -373,6 +398,8 @@ if __name__ == "__main__":
         sample_device=device
     )
 
+    # Add these lines after optimizer definitions
+    max_grad_norm = 1.0  # Adjust this value as needed
 
     # TRY NOT TO MODIFY: start the game
     obs, info = envs.reset(seed=args.seed) # in Gymnasium, seed is given to reset() instead of seed()
@@ -393,14 +420,68 @@ if __name__ == "__main__":
             eval_obs, _ = eval_envs.reset()
             eval_metrics = defaultdict(list)
             num_episodes = 0
-            for _ in range(args.num_eval_steps):
-                with torch.no_grad():
-                    eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor.get_eval_action(eval_obs))
-                    if "final_info" in eval_infos:
-                        mask = eval_infos["_final_info"]
-                        num_episodes += mask.sum()
-                        for k, v in eval_infos["final_info"]["episode"].items():
-                            eval_metrics[k].append(v)
+
+            if args.wandb_reward_trajectories:
+                # Initialize reward tracking for each environment
+                reward_trajectories = [[] for _ in range(args.num_eval_envs)]
+                episode_steps = [0] * args.num_eval_envs
+                active_envs = [True] * args.num_eval_envs
+                
+                for step in range(args.num_eval_steps):
+                    with torch.no_grad():
+                        eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor.get_eval_action(eval_obs))
+                        if "final_info" in eval_infos:
+                            mask = eval_infos["_final_info"]
+                            num_episodes += mask.sum()
+                            for k, v in eval_infos["final_info"]["episode"].items():
+                                eval_metrics[k].append(v)
+
+                        # Track rewards for each environment
+                        for env_idx in range(args.num_eval_envs):
+                            if active_envs[env_idx]:
+                                reward_trajectories[env_idx].append(eval_rew[env_idx].item())
+                                episode_steps[env_idx] += 1
+                                
+                                # Check if episode ended
+                                if eval_terminations[env_idx] or eval_truncations[env_idx]:
+                                    active_envs[env_idx] = False
+                        
+                # Log reward trajectories
+                if logger is not None and logger.log_wandb:
+                    # Group data by environment
+                    xs_by_env = []
+                    ys_by_env = []
+                    keys = []
+                    
+                    # Find top 4 trajectories with highest mean reward
+                    reward_trajectories_sorted = sorted(reward_trajectories, key=lambda x: np.mean(x), reverse=True)
+                    reward_trajectories_sorted = reward_trajectories_sorted[:4]
+                    for env_idx, rewards in enumerate(reward_trajectories_sorted):
+                        if len(rewards) > 0:  # Only include environments with data
+                            xs_by_env.append(list(range(len(rewards))))  # Steps for this env
+                            ys_by_env.append(rewards)  # Rewards for this env
+                            keys.append(f"env_{env_idx}")  # Label for this env
+                    
+                    if keys:  # Only log if we have data
+                        # Use line_series with properly structured data
+                        wandb.log({"eval/reward_trajectories": wandb.plot.line_series(
+                            xs=xs_by_env,  # List of lists of x values
+                            ys=ys_by_env,  # List of lists of y values
+                            keys=keys,     # List of labels
+                            title="Reward Trajectories",
+                            xname="Step")}, 
+                            step=global_step)
+                        
+            else:
+                for _ in range(args.num_eval_steps):
+                    with torch.no_grad():
+                        eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor.get_eval_action(eval_obs))
+                        if "final_info" in eval_infos:
+                            mask = eval_infos["_final_info"]
+                            num_episodes += mask.sum()
+                            for k, v in eval_infos["final_info"]["episode"].items():
+                                eval_metrics[k].append(v)
+
             eval_metrics_mean = {}
             for k, v in eval_metrics.items():
                 mean = torch.stack(v).float().mean()
@@ -420,7 +501,7 @@ if __name__ == "__main__":
             actor.train()
 
             if args.save_model:
-                model_path = f"runs/{run_name}/ckpt_{global_step}.pt"
+                model_path = f"{args.save_model_dir}/{run_name}/ckpt_{global_step}.pt"
                 torch.save({
                     'actor': actor.state_dict(),
                     'qf1': qf1_target.state_dict(),
@@ -496,6 +577,8 @@ if __name__ == "__main__":
 
             q_optimizer.zero_grad()
             qf_loss.backward()
+            torch.nn.utils.clip_grad_norm_(qf1.parameters(), max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(qf2.parameters(), max_grad_norm)
             q_optimizer.step()
 
             # update the policy network
@@ -508,6 +591,7 @@ if __name__ == "__main__":
 
                 actor_optimizer.zero_grad()
                 actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(actor.parameters(), max_grad_norm)
                 actor_optimizer.step()
 
                 if args.autotune:
@@ -552,7 +636,7 @@ if __name__ == "__main__":
                 logger.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
     if not args.evaluate and args.save_model:
-        model_path = f"runs/{run_name}/final_ckpt.pt"
+        model_path = f"{args.save_model_dir}/{run_name}/final_ckpt.pt"
         torch.save({
             'actor': actor.state_dict(),
             'qf1': qf1_target.state_dict(),
