@@ -10,7 +10,7 @@ spec:
         image: dhbhatt/maniskill-experiments:v4.1_tdmpc
         command: ["/bin/bash", "-c"]
         args: [
-          # "export WANDB_API_KEY=ebf815cc1a406e10c78314a2a137fa38d83c0b02 && git pull && \
+          # "git pull && \
           # python examples/baselines/sac/sac.py \
           #        --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
           #        --exp_name PlaceCubeMatched3_xarm6_pandagripper_jv_sac \
@@ -26,14 +26,14 @@ spec:
           #        --track \
           #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
-          "export WANDB_API_KEY=ebf815cc1a406e10c78314a2a137fa38d83c0b02 && git stash && git pull && \
-          python examples/baselines/tdmpc2/train.py \
+          "git stash && git pull && \
+          echo y | python examples/baselines/tdmpc2/train.py \
                   model_size=5 \
                   steps=5_000_000 \
                   seed=1 \
-                  wandb_name=PlaceCubeMatched3_xarm6_pandagripper_jv_tdmpc2 \
-                  env_id=PlaceCube-v1 \
-                  robot_uids=xarm6_pandagripper \
+                  wandb_name=PickCube_xarm6_robotiq_tdmpc2 \
+                  env_id=PickCube-v1 \
+                  robot_uids=xarm6_robotiq \
                   control_mode=pd_joint_vel \
                   env_type=gpu \
                   num_envs=32 \
@@ -42,7 +42,7 @@ spec:
                   wandb=true \
               > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-tdmpc.log"
 
-          # "export WANDB_API_KEY=ebf815cc1a406e10c78314a2a137fa38d83c0b02 && git pull && \
+          # "git pull && \
           # python examples/baselines/ppo/ppo.py \
           #         --env_id=PlaceCube-v1 \
           #         --robot_uids=xarm6_pandagripper \
@@ -61,6 +61,12 @@ spec:
           #         --wandb_video_freq=50 \
           #     > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-ppo.log"
         ]
+        env:
+        - name: WANDB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wandb-secret
+              key: api-key
         volumeMounts:
         - mountPath: /pers_vol
           name: db-cephfs-volume
@@ -91,6 +97,14 @@ spec:
         #     - "NVIDIA-RTX-A6000"
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - "ry-gpu-10.sdsc.optiputer.net"
+                - "k8s-gpu-03.sdsc.optiputer.net"
           - weight: 80
             preference:
               matchExpressions:
