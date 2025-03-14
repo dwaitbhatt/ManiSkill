@@ -6,13 +6,11 @@ import numpy as np
 import sapien
 import torch
 import torch.random
-from transforms3d.euler import euler2quat
 
 from mani_skill.agents.robots import Fetch, Panda, XArm6Robotiq
 from mani_skill.envs.sapien_env import BaseEnv
-from mani_skill.envs.utils import randomization
 from mani_skill.sensors.camera import CameraConfig
-from mani_skill.utils import common, sapien_utils
+from mani_skill.utils import sapien_utils
 from mani_skill.utils.building import actors
 from mani_skill.utils.registration import register_env
 from mani_skill.utils.scene_builder.table import TableSceneBuilder
@@ -29,17 +27,17 @@ class PlaceCubeEnv(BaseEnv):
 
     Randomizations
     --------------
-    The position of the bin and the cube are randomized: The bin is inited in [0, 0.1]x[-0.1, 0.1], and the cube is inited in [-0.1, -0.05]x[-0.1, 0.1]
+    The position of the bin and the cube are randomized: The bin is inited in [0, 0.1]x[-0.1, 0.1], and the cube is inited in [-0.2, -0.15]x[-0.2, 0.2]
 
     Success Conditions
     ------------------
-    The cube is place on the top of the bin. The robot remains static and the gripper is not closed at the end state
+    The cube is placed inside the bin and static. The robot remains static and the gripper is not closed at the end state
     """
 
-    SUPPORTED_ROBOTS = ["panda", "fetch", "xarm6_robotiq"]
+    SUPPORTED_ROBOTS = ["panda", "xarm6_robotiq"]
 
     # Specify some supported robot types
-    agent: Union[Panda, Fetch, XArm6Robotiq]
+    agent: Union[Panda, XArm6Robotiq]
 
     # set some commonly used values
     cube_half_length = 0.02  # half side length of the cube
@@ -93,7 +91,6 @@ class PlaceCubeEnv(BaseEnv):
     def _build_bin(self):
         builder = self.scene.create_actor_builder()
 
-        # init the locations of the basic blocks
         dx = self.block_half_size[1] - self.block_half_size[0]
         dy = self.block_half_size[1] - self.block_half_size[0]
         dz = self.edge_block_half_size[2] + self.block_half_size[0]
@@ -126,17 +123,14 @@ class PlaceCubeEnv(BaseEnv):
             builder.add_box_visual(pose, half_size)
 
         builder.initial_pose = sapien.Pose(p=[0, 0, 0])
-        # build the kinematic bin
         return builder.build_kinematic(name="bin")
 
     def _load_scene(self, options: dict):
-        # load the table
         self.table_scene = TableSceneBuilder(
             env=self, robot_init_qpos_noise=self.robot_init_qpos_noise
         )
         self.table_scene.build()
 
-        # load the cube
         self.obj = actors.build_cube(
             self.scene,
             half_size=self.cube_half_length,
@@ -146,7 +140,6 @@ class PlaceCubeEnv(BaseEnv):
             initial_pose=sapien.Pose(p=[0, 0, self.cube_half_length + 2*self.short_side_half_size]),
         )
 
-        # load the bin
         self.bin = self._build_bin()
 
     def _load_agent(self, options: dict):
@@ -154,31 +147,32 @@ class PlaceCubeEnv(BaseEnv):
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
-            # init the table scene
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
 
-            # init the cube in the first 1/4 zone along the x-axis (so that it doesn't collide the bin)
+            # init the ~4cm cube in ([-0.2, -0.15]) along the x-axis (so that it doesn't collide with the bin)
             xyz = torch.zeros((b, 3))
             xyz[..., 0] = (torch.rand((b, 1)) * 0.05 - 0.2)[
                 ..., 0
-            ]  # first 1/4 zone of x ([-0.2, -0.15])
+            ]
+            # spanning ys from ([-0.2, 0.2])
             xyz[..., 1] = (torch.rand((b, 1)) * 0.4 - 0.2)[
                 ..., 0
-            ]  # spanning all possible ys ([])
+            ]
             xyz[..., 2] = self.cube_half_length  # on the table
             q = [1, 0, 0, 0]
             obj_pose = Pose.create_from_pq(p=xyz, q=q)
             self.obj.set_pose(obj_pose)
 
-            # init the bin in the last 1/2 zone along the x-axis (so that it doesn't collide the cube)
+            # init the ~12cm bin in ([0, 0.1]) along the x-axis (so that it doesn't collide with the cube)
             pos = torch.zeros((b, 3))
             pos[:, 0] = (
                 torch.rand((b, 1))[..., 0] * 0.1
-            )  # the last 1/2 zone of x ([0, 0.1])
+            )
+            # spanning ys from ([-0.1, 0.1])
             pos[:, 1] = (
                 torch.rand((b, 1))[..., 0] * 0.2 - 0.1
-            )  # spanning all possible ys
+            )
             pos[:, 2] = self.block_half_size[0]  # on the table
             q = [1, 0, 0, 0]
             bin_pose = Pose.create_from_pq(p=pos, q=q)
@@ -211,6 +205,7 @@ class PlaceCubeEnv(BaseEnv):
         }
 
     def _get_obs_extra(self, info: Dict):
+        # Only keep observables that are easy to get in the real world
         obs = dict(
             # is_grasped=info["is_obj_grasped"],
             # tcp_pose=self.agent.tcp.pose.raw_pose,
@@ -274,6 +269,5 @@ class PlaceCubeEnv(BaseEnv):
         return reward
 
     def compute_normalized_dense_reward(self, obs: Any, action: Array, info: Dict):
-        # this should be equal to compute_dense_reward / max possible reward
         max_reward = 15
         return self.compute_dense_reward(obs=obs, action=action, info=info) / max_reward
