@@ -1,0 +1,131 @@
+from typing import Type
+
+import torch
+from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+
+from utils import Args, Logger
+from replay_buffer import ReplayBuffer, ReplayBufferSample
+
+import numpy as np
+import torch.nn as nn
+import torch.optim as optim
+
+class SoftQNetwork(nn.Module):
+    def __init__(self, env):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, x, a):
+        x = torch.cat([x, a], 1)
+        return self.net(x)
+
+
+class NormalizedActor(nn.Module):
+    """
+    Base class for all actors. 
+    The network outputs should be between -1 and 1. They should be normalized to the action
+    space limits in the forward pass using the `action_scale` and `action_bias` buffers.
+    """
+
+    def __init__(self, env):
+        super().__init__()
+        h, l = env.single_action_space.high, env.single_action_space.low
+        self.register_buffer("action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32))
+        self.register_buffer("action_bias", torch.tensor((h + l) / 2.0, dtype=torch.float32))
+        # These buffers are persistent and will be saved in state_dict()
+
+    def forward(self, x):
+        """
+        This should return an (unnormalized) action sampled from the policy distribution.
+        """
+        raise NotImplementedError
+    
+    def get_eval_action(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        This should return the best (unnormalized) action as per the current policy.
+        """
+        raise NotImplementedError
+
+    def to(self, device):
+        self.action_scale = self.action_scale.to(device)
+        self.action_bias = self.action_bias.to(device)
+        return super().to(device)
+
+
+class ActorCriticAgent:
+    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args, actor_class: Type[NormalizedActor]):
+        self.envs = envs
+        self.device = device
+        self.args = args
+
+        self.actor = actor_class(envs).to(device)
+        self.actor_target = actor_class(envs).to(device)
+        
+        self.qf1 = SoftQNetwork(envs).to(device)
+        self.qf2 = SoftQNetwork(envs).to(device)
+        self.qf1_target = SoftQNetwork(envs).to(device)
+        self.qf2_target = SoftQNetwork(envs).to(device)
+        
+        if args.checkpoint is not None:
+            ckpt = torch.load(args.checkpoint)
+            self.actor.load_state_dict(ckpt['actor'])
+            self.qf1.load_state_dict(ckpt['qf1'])
+            self.qf2.load_state_dict(ckpt['qf2'])
+
+        self.qf1_target.load_state_dict(self.qf1.state_dict())
+        self.qf2_target.load_state_dict(self.qf2.state_dict())
+
+        self.q_optimizer = optim.Adam(list(self.qf1.parameters()) + list(self.qf2.parameters()), lr=args.q_lr)
+        self.actor_optimizer = optim.Adam(list(self.actor.parameters()), lr=args.policy_lr)
+
+        self.logging_tracker = {}
+
+    def log_losses(self, logger: Logger, global_step: int):
+        for k, v in self.logging_tracker.items():
+            logger.add_scalar(k, v, global_step)
+
+    def update_target_networks(self):
+        for param, target_param in zip(self.qf1.parameters(), self.qf1_target.parameters()):
+            target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+        for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
+            target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+
+    def update(self, rb: ReplayBuffer, global_update: int, global_step: int):
+        """
+        Update the actor and critic networks as per the algorithm.
+        """
+        for local_update in range(self.args.grad_steps_per_iteration):
+            global_update += 1
+            data = rb.sample(self.args.batch_size)
+
+            self.update_critic(data, global_step)
+
+            # Delayed policy updates
+            if global_update % self.args.policy_frequency == 0:
+                self.update_actor(data, global_step)
+            if global_update % self.args.target_network_frequency == 0:
+                self.update_target_networks()
+        return global_update
+
+    def update_critic(self, data: ReplayBufferSample):
+        raise NotImplementedError
+    
+    def update_actor(self, data: ReplayBufferSample):
+        raise NotImplementedError
+
+    def sample_action(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Sample an action from the actor. This action will be used to collect experience during training.
+        """
+        raise NotImplementedError
+    
+    def save_model(self, model_path: str):
+        raise NotImplementedError

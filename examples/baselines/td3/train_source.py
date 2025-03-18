@@ -13,7 +13,7 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
 from utils import Args, Logger
 from replay_buffer import ReplayBuffer
-from td3 import TD3Agent
+from agents import ActorCriticAgent, TD3Agent, SACAgent
 
 import gymnasium as gym
 import numpy as np
@@ -22,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tyro
 
 
-def evaluate(agent: TD3Agent, eval_envs: gym.Env, args: Args, logger: Logger, global_step: int):
+def evaluate(agent: ActorCriticAgent, eval_envs: gym.Env, args: Args, logger: Logger, global_step: int):
     agent.actor.eval()
     stime = time.perf_counter()
     eval_obs, _ = eval_envs.reset()
@@ -30,7 +30,7 @@ def evaluate(agent: TD3Agent, eval_envs: gym.Env, args: Args, logger: Logger, gl
     num_episodes = 0
     for _ in range(args.num_eval_steps):
         with torch.no_grad():
-            eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.actor(eval_obs))
+            eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.actor.get_eval_action(eval_obs))
             if "final_info" in eval_infos:
                 mask = eval_infos["_final_info"]
                 num_episodes += mask.sum()
@@ -53,7 +53,8 @@ def evaluate(agent: TD3Agent, eval_envs: gym.Env, args: Args, logger: Logger, gl
     agent.actor.train()
 
     if args.save_model:
-        agent.save_model(run_name)
+        model_path = f"{args.save_model_dir}/{run_name}/ckpt_{global_step}.pt"
+        agent.save_model(model_path)
 
     return eval_metrics_mean
 
@@ -63,7 +64,7 @@ if __name__ == "__main__":
     args.grad_steps_per_iteration = int(args.training_freq * args.utd)
     args.steps_per_env = args.training_freq // args.num_envs
     if args.exp_name is None:
-        args.exp_name = os.path.basename(__file__)[: -len(".py")]
+        args.exp_name = f"{args.algorithm.lower()}"
         run_name = f"{args.env_id}__{args.exp_name}__{args.robot}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
@@ -115,7 +116,7 @@ if __name__ == "__main__":
                 name=run_name,
                 save_code=True,
                 group=args.wandb_group,
-                tags=["td3", "walltime_efficient"]  # Changed from "sac" to "td3"
+                tags=[args.algorithm.lower(), "walltime_efficient"]
             )
         writer = SummaryWriter(f"runs/{run_name}")
         writer.add_text(
@@ -149,7 +150,12 @@ if __name__ == "__main__":
     pbar = tqdm.tqdm(range(args.total_timesteps))
     cumulative_times = defaultdict(float)
 
-    agent = TD3Agent(envs, device, args)
+    if args.algorithm == "TD3":
+        agent = TD3Agent(envs, device, args)
+    elif args.algorithm == "SAC":
+        agent = SACAgent(envs, device, args)
+    else:
+        raise ValueError(f"Algorithm {args.algorithm} not supported")
 
     while global_step < args.total_timesteps:
         if args.eval_freq > 0 and (global_step - args.training_freq) // args.eval_freq < global_step // args.eval_freq:
@@ -168,6 +174,8 @@ if __name__ == "__main__":
                 actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
             else:
                 actions = agent.sample_action(obs)
+                actions = actions.detach()
+
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, terminations, truncations, infos = envs.step(actions)
             real_next_obs = next_obs.clone()
@@ -219,6 +227,7 @@ if __name__ == "__main__":
             logger.add_scalar("time/total_rollout+update_time", cumulative_times["rollout_time"] + cumulative_times["update_time"], global_step)
 
     if not args.evaluate and args.save_model:
-        agent.save_model(run_name)
+        model_path = f"{args.save_model_dir}/{run_name}/final_ckpt.pt"
+        agent.save_model(model_path)
         writer.close()
     envs.close()

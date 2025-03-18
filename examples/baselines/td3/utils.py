@@ -19,6 +19,8 @@ class Logger:
 class Args:
     exp_name: Optional[str] = None
     """the name of this experiment"""
+    algorithm: str = "TD3"
+    """the actor-critic algorithm to use for the experiment (TD3 or SAC)"""
     robot: str = "panda"
     """which robot to use for the experiment"""
     control_mode: str = "pd_joint_pos"
@@ -115,6 +117,15 @@ class Args:
     """noise added to target policy during critic update"""
     exploration_noise: float = 0.1
     """standard deviation of exploration noise"""
+
+    # SAC specific parameters
+    alpha: float = 0.2
+    """Entropy regularization coefficient."""
+    autotune: bool = True
+    """automatic tuning of the entropy coefficient"""
+    target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
+    """the frequency of updates for the target nerworks"""
+
     training_freq: int = 64
     """training frequency (in steps)"""
     utd: float = 0.5
