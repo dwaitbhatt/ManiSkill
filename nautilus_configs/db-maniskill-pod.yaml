@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: db-maniskill-td3-placecube
+  name: db-maniskill-sac-newnets
 spec:
   containers:
   - name: gpu-container
@@ -28,21 +28,22 @@ spec:
           #        --track \
           #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
-          "git pull && \
-          echo y | python examples/baselines/td3/td3.py \
+          "git fetch origin xemb-transfer && git reset --hard origin/xemb-transfer && \
+          echo y | python examples/baselines/x-emb/train_source.py \
                  --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
-                 --env-id PlaceCube-v1 \
+                 --algorithm SAC \
+                 --env-id PickCube-v1 \
                  --robot xarm6_robotiq \
                  --control_mode pd_joint_vel \
+                 --exp_name PickCube_xarm6_robotiq_sac_newnets \
                  --num-envs 128 \
                  --training-freq 128 \
                  --num-eval-steps 100 \
                  --eval-freq 50_000 \
-                 --total-timesteps 1_000_000 \
+                 --total-timesteps 500_000 \
                  --wandb-video-freq 2 \
-                 --wandb_reward_trajectories \
                  --track \
-            > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-td3.log"
+            > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
           # "git pull && \
           # echo y | python examples/baselines/ppo/ppo.py \
