@@ -1,0 +1,131 @@
+import wandb
+from torch.utils.tensorboard import SummaryWriter
+from dataclasses import dataclass
+from typing import Optional
+
+class Logger:
+    def __init__(self, log_wandb=False, tensorboard: SummaryWriter = None) -> None:
+        self.writer = tensorboard
+        self.log_wandb = log_wandb
+    def add_scalar(self, tag, scalar_value, step):
+        if self.log_wandb:
+            wandb.log({tag: scalar_value}, step=step)
+        self.writer.add_scalar(tag, scalar_value, step)
+    def close(self):
+        self.writer.close()
+
+
+@dataclass
+class Args:
+    exp_name: Optional[str] = None
+    """the name of this experiment"""
+    robot: str = "panda"
+    """which robot to use for the experiment"""
+    control_mode: str = "pd_joint_pos"
+    """which control mode to use for the experiment"""
+    seed: int = 1
+    """seed of the experiment"""
+    torch_deterministic: bool = True
+    """if toggled, `torch.backends.cudnn.deterministic=False`"""
+    cuda: bool = True
+    """if toggled, cuda will be enabled by default"""
+    track: bool = False
+    """if toggled, this experiment will be tracked with Weights and Biases"""
+    wandb_project_name: str = "maniskill_experiments"
+    """the wandb's project name"""
+    wandb_entity: str = "ucsd_erl"
+    """the entity (team) of wandb's project"""
+    wandb_group: str = "TD3"
+    """the group of the run for wandb"""
+    capture_video: bool = True
+    """whether to capture videos of the agent performances (check out `videos` folder)"""
+    save_trajectory: bool = False
+    """whether to save trajectory data into the `videos` folder"""
+    save_model: bool = True
+    """whether to save model into the `runs/{run_name}` folder"""
+    evaluate: bool = False
+    """if toggled, only runs evaluation with the given model checkpoint and saves the evaluation trajectories"""
+    checkpoint: Optional[str] = None
+    """path to a pretrained checkpoint file to start evaluation/training from"""
+    log_freq: int = 1_000
+    """logging frequency in terms of environment steps"""
+    capture_video: bool = True
+    """whether to capture videos of the agent performances (check out `videos` folder)"""
+    wandb_video_freq: int = 0
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
+    save_model: bool = True
+    """whether to save the model checkpoints"""
+    save_model_dir: Optional[str] = "runs"
+    """the directory to save the model"""
+
+    # Environment specific arguments
+    env_id: str = "PickCube-v1"
+    """the id of the environment"""
+    env_vectorization: str = "gpu"
+    """the type of environment vectorization to use"""
+    num_envs: int = 16
+    """the number of parallel environments"""
+    num_eval_envs: int = 16
+    """the number of parallel evaluation environments"""
+    partial_reset: bool = False
+    """whether to let parallel environments reset upon termination instead of truncation"""
+    eval_partial_reset: bool = False
+    """whether to let parallel evaluation environments reset upon termination instead of truncation"""
+    num_steps: int = 50
+    """the number of steps to run in each environment per policy rollout"""
+    num_eval_steps: int = 50
+    """the number of steps to run in each evaluation environment during evaluation"""
+    reconfiguration_freq: Optional[int] = None
+    """how often to reconfigure the environment during training"""
+    eval_reconfiguration_freq: Optional[int] = 1
+    """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
+    eval_freq: int = 25
+    """evaluation frequency in terms of iterations"""
+    save_train_video_freq: Optional[int] = None
+    """frequency to save training videos in terms of iterations"""
+    control_mode: Optional[str] = "pd_joint_delta_pos"
+    """the control mode to use for the environment"""
+
+    # Algorithm specific arguments
+    total_timesteps: int = 1_000_000
+    """total timesteps of the experiments"""
+    buffer_size: int = 1_000_000
+    """the replay memory buffer size"""
+    buffer_device: str = "cuda"
+    """where the replay buffer is stored. Can be 'cpu' or 'cuda' for GPU"""
+    gamma: float = 0.8
+    """the discount factor gamma"""
+    tau: float = 0.01
+    """target smoothing coefficient"""
+    batch_size: int = 1024
+    """the batch size of sample from the replay memory"""
+    learning_starts: int = 4_000
+    """timestep to start learning"""
+    policy_lr: float = 3e-4
+    """the learning rate of the policy network optimizer"""
+    q_lr: float = 3e-4
+    """the learning rate of the Q network network optimizer"""
+    policy_frequency: int = 2
+    """the frequency of training policy (delayed)"""
+
+    # TD3 specific parameters
+    noise_clip: float = 0.5
+    """clip parameter of the target policy noise"""
+    target_policy_noise: float = 0.1
+    """noise added to target policy during critic update"""
+    exploration_noise: float = 0.1
+    """standard deviation of exploration noise"""
+    training_freq: int = 64
+    """training frequency (in steps)"""
+    utd: float = 0.5
+    """update to data ratio"""
+    partial_reset: bool = False
+    """whether to let parallel environments reset upon termination instead of truncation"""
+    bootstrap_at_done: str = "always"
+    """the bootstrap method to use when a done signal is received. Can be 'always' or 'never'"""
+
+    # to be filled in runtime
+    grad_steps_per_iteration: int = 0
+    """the number of gradient updates per iteration"""
+    steps_per_env: int = 0
+    """the number of steps each parallel env takes per iteration"""
