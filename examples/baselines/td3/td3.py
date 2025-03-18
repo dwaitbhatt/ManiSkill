@@ -271,6 +271,159 @@ class Logger:
     def close(self):
         self.writer.close()
 
+
+class TD3Agent:
+    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args):
+        self.envs = envs
+        self.device = device
+        self.args = args
+
+        self.actor = Actor(envs).to(device)
+        self.actor_target = Actor(envs).to(device)
+        
+        self.qf1 = SoftQNetwork(envs).to(device)
+        self.qf2 = SoftQNetwork(envs).to(device)
+        self.qf1_target = SoftQNetwork(envs).to(device)
+        self.qf2_target = SoftQNetwork(envs).to(device)
+        
+        if args.checkpoint is not None:
+            ckpt = torch.load(args.checkpoint)
+            self.actor.load_state_dict(ckpt['actor'])
+            self.qf1.load_state_dict(ckpt['qf1'])
+            self.qf2.load_state_dict(ckpt['qf2'])
+
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.qf1_target.load_state_dict(self.qf1.state_dict())
+        self.qf2_target.load_state_dict(self.qf2.state_dict())
+
+        self.q_optimizer = optim.Adam(list(self.qf1.parameters()) + list(self.qf2.parameters()), lr=args.q_lr)
+        self.actor_optimizer = optim.Adam(list(self.actor.parameters()), lr=args.policy_lr)
+
+        self.logging_tracker = {}
+
+    def sample_action(self, obs: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            actions = self.actor(obs)
+            # Add exploration noise
+            noise = torch.randn_like(actions) * self.args.exploration_noise
+            actions = (actions + noise).clamp(self.envs.single_action_space.low[0], self.envs.single_action_space.high[0])
+        return actions
+    
+    def update_critic(self, data: ReplayBufferSample):
+        # update the value networks
+        with torch.no_grad():
+            # Select action according to policy and add clipped noise
+            noise = (torch.randn_like(data.actions) * self.args.target_policy_noise).clamp(
+                -self.args.noise_clip, self.args.noise_clip
+            )
+            
+            next_state_actions = (self.actor_target(data.next_obs) + noise).clamp(
+                self.envs.single_action_space.low[0], self.envs.single_action_space.high[0]
+            )
+            
+            qf1_next_target = self.qf1_target(data.next_obs, next_state_actions)
+            qf2_next_target = self.qf2_target(data.next_obs, next_state_actions)
+            min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
+            next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target).view(-1)
+
+        qf1_a_values = self.qf1(data.obs, data.actions).view(-1)
+        qf2_a_values = self.qf2(data.obs, data.actions).view(-1)
+        qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+        qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+        qf_loss = qf1_loss + qf2_loss
+
+        self.q_optimizer.zero_grad()
+        qf_loss.backward()
+        self.q_optimizer.step()
+
+        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker["losses/qf1_values"] = qf1_a_values.mean().item()
+            self.logging_tracker["losses/qf2_values"] = qf2_a_values.mean().item()
+            self.logging_tracker["losses/qf1_loss"] = qf1_loss.item()
+            self.logging_tracker["losses/qf2_loss"] = qf2_loss.item()
+            self.logging_tracker["losses/qf_loss"] = qf_loss.item() / 2.0
+
+    def update_actor(self, data: ReplayBufferSample):
+        actor_loss = -self.qf1(data.obs, self.actor(data.obs)).mean()
+        
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()    
+
+        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker["losses/actor_loss"] = actor_loss.item()
+
+    def update_target_networks(self):
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+            target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+        for param, target_param in zip(self.qf1.parameters(), self.qf1_target.parameters()):
+            target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+        for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
+            target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+
+    def update(self, rb: ReplayBuffer):
+        global global_update
+        for local_update in range(self.args.grad_steps_per_iteration):
+            global_update += 1
+            data = rb.sample(self.args.batch_size)
+
+            self.update_critic(data)
+
+            # Delayed policy updates
+            if global_update % self.args.policy_frequency == 0:
+                self.update_actor(data)
+                self.update_target_networks()
+ 
+    def log_losses(self, logger: Logger):
+        for k, v in self.logging_tracker.items():
+            logger.add_scalar(k, v, global_step)
+
+    def save_model(self, run_name: str):
+        model_path = f"{self.args.save_model_dir}/{run_name}/final_ckpt.pt"
+        torch.save({
+            'actor': self.actor.state_dict(),
+            'qf1': self.qf1_target.state_dict(),
+            'qf2': self.qf2_target.state_dict(),
+        }, model_path)
+        print(f"model saved to {model_path}")
+
+
+def evaluate(agent: TD3Agent, eval_envs: gym.Env, args: Args, logger: Logger, global_step: int):
+    agent.actor.eval()
+    stime = time.perf_counter()
+    eval_obs, _ = eval_envs.reset()
+    eval_metrics = defaultdict(list)
+    num_episodes = 0
+    for _ in range(args.num_eval_steps):
+        with torch.no_grad():
+            eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.actor(eval_obs))
+            if "final_info" in eval_infos:
+                mask = eval_infos["_final_info"]
+                num_episodes += mask.sum()
+                for k, v in eval_infos["final_info"]["episode"].items():
+                    eval_metrics[k].append(v)
+    eval_metrics_mean = {}
+    for k, v in eval_metrics.items():
+        mean = torch.stack(v).float().mean()
+        eval_metrics_mean[k] = mean
+        if logger is not None:
+            logger.add_scalar(f"eval/{k}", mean, global_step)
+    pbar.set_description(
+        f"success_once: {eval_metrics_mean['success_once']:.2f}, "
+        f"return: {eval_metrics_mean['return']:.2f}"
+    )
+    if logger is not None:
+        eval_time = time.perf_counter() - stime
+        cumulative_times["eval_time"] += eval_time
+        logger.add_scalar("time/eval_time", eval_time, global_step)
+    agent.actor.train()
+
+    if args.save_model:
+        agent.save_model(run_name)
+
+    return eval_metrics_mean
+
+
 if __name__ == "__main__":
     args = tyro.cli(Args)
     args.grad_steps_per_iteration = int(args.training_freq * args.utd)
@@ -341,26 +494,6 @@ if __name__ == "__main__":
 
     max_action = float(envs.single_action_space.high[0])
 
-    actor = Actor(envs).to(device)
-    actor_target = Actor(envs).to(device)
-    
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
-    
-    if args.checkpoint is not None:
-        ckpt = torch.load(args.checkpoint)
-        actor.load_state_dict(ckpt['actor'])
-        qf1.load_state_dict(ckpt['qf1'])
-        qf2.load_state_dict(ckpt['qf2'])
-
-    actor_target.load_state_dict(actor.state_dict())
-    qf1_target.load_state_dict(qf1.state_dict())
-    qf2_target.load_state_dict(qf2.state_dict())
-    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
-    actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
-
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(
         env=envs,
@@ -382,48 +515,14 @@ if __name__ == "__main__":
     pbar = tqdm.tqdm(range(args.total_timesteps))
     cumulative_times = defaultdict(float)
 
+    agent = TD3Agent(envs, device, args)
+
     while global_step < args.total_timesteps:
         if args.eval_freq > 0 and (global_step - args.training_freq) // args.eval_freq < global_step // args.eval_freq:
             # evaluate
-            actor.eval()
-            stime = time.perf_counter()
-            eval_obs, _ = eval_envs.reset()
-            eval_metrics = defaultdict(list)
-            num_episodes = 0
-            for _ in range(args.num_eval_steps):
-                with torch.no_grad():
-                    eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor(eval_obs))
-                    if "final_info" in eval_infos:
-                        mask = eval_infos["_final_info"]
-                        num_episodes += mask.sum()
-                        for k, v in eval_infos["final_info"]["episode"].items():
-                            eval_metrics[k].append(v)
-            eval_metrics_mean = {}
-            for k, v in eval_metrics.items():
-                mean = torch.stack(v).float().mean()
-                eval_metrics_mean[k] = mean
-                if logger is not None:
-                    logger.add_scalar(f"eval/{k}", mean, global_step)
-            pbar.set_description(
-                f"success_once: {eval_metrics_mean['success_once']:.2f}, "
-                f"return: {eval_metrics_mean['return']:.2f}"
-            )
-            if logger is not None:
-                eval_time = time.perf_counter() - stime
-                cumulative_times["eval_time"] += eval_time
-                logger.add_scalar("time/eval_time", eval_time, global_step)
+            evaluate(agent, eval_envs, args, logger, global_step)
             if args.evaluate:
                 break
-            actor.train()
-
-            if args.save_model:
-                model_path = f"{args.save_model_dir}/{run_name}/ckpt_{global_step}.pt"
-                torch.save({
-                    'actor': actor.state_dict(),
-                    'qf1': qf1_target.state_dict(),
-                    'qf2': qf2_target.state_dict(),
-                }, model_path)
-                print(f"model saved to {model_path}")
 
         # Collect samples from environments
         rollout_time = time.perf_counter()
@@ -434,12 +533,7 @@ if __name__ == "__main__":
             if not learning_has_started:
                 actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
             else:
-                with torch.no_grad():
-                    actions = actor(obs)
-                    # Add exploration noise
-                    noise = torch.randn_like(actions) * args.exploration_noise
-                    actions = (actions + noise).clamp(envs.single_action_space.low[0], envs.single_action_space.high[0])
-
+                actions = agent.sample_action(obs)
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, terminations, truncations, infos = envs.step(actions)
             real_next_obs = next_obs.clone()
@@ -474,65 +568,15 @@ if __name__ == "__main__":
 
         update_time = time.perf_counter()
         learning_has_started = True
-        for local_update in range(args.grad_steps_per_iteration):
-            global_update += 1
-            data = rb.sample(args.batch_size)
-
-            # update the value networks
-            with torch.no_grad():
-                # Select action according to policy and add clipped noise
-                noise = (torch.randn_like(data.actions) * args.target_policy_noise).clamp(
-                    -args.noise_clip, args.noise_clip
-                )
-                
-                next_state_actions = (actor_target(data.next_obs) + noise).clamp(
-                    envs.single_action_space.low[0], envs.single_action_space.high[0]
-                )
-                
-                qf1_next_target = qf1_target(data.next_obs, next_state_actions)
-                qf2_next_target = qf2_target(data.next_obs, next_state_actions)
-                min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
-                next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
-
-            qf1_a_values = qf1(data.obs, data.actions).view(-1)
-            qf2_a_values = qf2(data.obs, data.actions).view(-1)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            qf_loss = qf1_loss + qf2_loss
-
-            q_optimizer.zero_grad()
-            qf_loss.backward()
-            q_optimizer.step()
-
-            # Delayed policy updates
-            if global_update % args.policy_frequency == 0:
-                # Compute actor loss
-                actor_loss = -qf1(data.obs, actor(data.obs)).mean()
-                
-                actor_optimizer.zero_grad()
-                actor_loss.backward()
-                actor_optimizer.step()
-
-                # Update the target networks
-                for param, target_param in zip(actor.parameters(), actor_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+        
+        agent.update(rb)
         
         update_time = time.perf_counter() - update_time
         cumulative_times["update_time"] += update_time
 
         # Log training-related data
         if (global_step - args.training_freq) // args.log_freq < global_step // args.log_freq:
-            logger.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-            logger.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-            logger.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-            logger.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-            logger.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-            if global_update % args.policy_frequency == 0:
-                logger.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
+            agent.log_losses(logger)
             logger.add_scalar("time/update_time", update_time, global_step)
             logger.add_scalar("time/rollout_time", rollout_time, global_step)
             logger.add_scalar("time/rollout_fps", global_steps_per_iteration / rollout_time, global_step)
@@ -541,12 +585,6 @@ if __name__ == "__main__":
             logger.add_scalar("time/total_rollout+update_time", cumulative_times["rollout_time"] + cumulative_times["update_time"], global_step)
 
     if not args.evaluate and args.save_model:
-        model_path = f"{args.save_model_dir}/{run_name}/final_ckpt.pt"
-        torch.save({
-            'actor': actor.state_dict(),
-            'qf1': qf1_target.state_dict(),
-            'qf2': qf2_target.state_dict(),
-        }, model_path)
-        print(f"model saved to {model_path}")
+        agent.save_model(run_name)
         writer.close()
     envs.close()
