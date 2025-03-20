@@ -9,25 +9,22 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from .actor_critic import ActorCriticAgent, NormalizedActor
 from replay_buffer import ReplayBuffer, ReplayBufferSample
 from utils import Args, Logger
+from layers import mlp
 
 
 # Simple deterministic actor
 class DeterministicActor(NormalizedActor):
-    def __init__(self, env):
-        super().__init__(env)
-        self.net = nn.Sequential(
-            nn.Linear(np.array(env.single_observation_space.shape).prod(), 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, np.prod(env.single_action_space.shape)),
-            nn.Tanh()
+    def __init__(self, env, args: Args):
+        super().__init__(env, args)
+        self.net = mlp(
+            np.prod(env.single_observation_space.shape), 
+            [args.mlp_dim] * args.num_layers,
+            np.prod(env.single_action_space.shape),
         )
 
     def forward(self, x):
         action = self.net(x)
+        action = torch.tanh(action)
         return action * self.action_scale + self.action_bias
 
     def get_eval_action(self, obs: torch.Tensor) -> torch.Tensor:
