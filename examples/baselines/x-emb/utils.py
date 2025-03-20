@@ -126,6 +126,12 @@ class Args:
     target_network_frequency: int = 1  # Denis Yarats' implementation delays this by 2.
     """the frequency of updates for the target nerworks"""
 
+    # Neural network hyperparameters
+    mlp_dim: int = 256
+    """the hidden dimension of the networks"""
+    num_layers: int = 3
+    """the number of hidden layers in the networks"""
+
     training_freq: int = 64
     """training frequency (in steps)"""
     utd: float = 0.5
