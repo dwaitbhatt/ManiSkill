@@ -5,22 +5,19 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
 from utils import Args, Logger
 from replay_buffer import ReplayBuffer, ReplayBufferSample
+from layers import mlp, weight_init
 
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, args: Args):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape), 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1),
+        self.net = mlp(
+            np.prod(env.single_observation_space.shape) + np.prod(env.single_action_space.shape), 
+            [args.mlp_dim] * args.num_layers, 
+            1
         )
 
     def forward(self, x, a):
@@ -35,7 +32,7 @@ class NormalizedActor(nn.Module):
     space limits in the forward pass using the `action_scale` and `action_bias` buffers.
     """
 
-    def __init__(self, env):
+    def __init__(self, env, args: Args):
         super().__init__()
         h, l = env.single_action_space.high, env.single_action_space.low
         self.register_buffer("action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32))
@@ -66,19 +63,21 @@ class ActorCriticAgent:
         self.device = device
         self.args = args
 
-        self.actor = actor_class(envs).to(device)
-        self.actor_target = actor_class(envs).to(device)
+        self.actor = actor_class(envs, args).to(device)
+        self.actor_target = actor_class(envs, args).to(device)
         
-        self.qf1 = SoftQNetwork(envs).to(device)
-        self.qf2 = SoftQNetwork(envs).to(device)
-        self.qf1_target = SoftQNetwork(envs).to(device)
-        self.qf2_target = SoftQNetwork(envs).to(device)
+        self.qf1 = SoftQNetwork(envs, args).to(device)
+        self.qf2 = SoftQNetwork(envs, args).to(device)
+        self.qf1_target = SoftQNetwork(envs, args).to(device)
+        self.qf2_target = SoftQNetwork(envs, args).to(device)
         
         if args.checkpoint is not None:
             ckpt = torch.load(args.checkpoint)
             self.actor.load_state_dict(ckpt['actor'])
             self.qf1.load_state_dict(ckpt['qf1'])
             self.qf2.load_state_dict(ckpt['qf2'])
+        else:
+            self.initialize_networks()
 
         self.qf1_target.load_state_dict(self.qf1.state_dict())
         self.qf2_target.load_state_dict(self.qf2.state_dict())
@@ -87,6 +86,11 @@ class ActorCriticAgent:
         self.actor_optimizer = optim.Adam(list(self.actor.parameters()), lr=args.policy_lr)
 
         self.logging_tracker = {}
+
+    def initialize_networks(self):
+        self.actor.apply(weight_init)
+        self.qf1.apply(weight_init)
+        self.qf2.apply(weight_init)
 
     def log_losses(self, logger: Logger, global_step: int):
         for k, v in self.logging_tracker.items():

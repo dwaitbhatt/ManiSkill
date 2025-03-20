@@ -9,23 +9,21 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from .actor_critic import ActorCriticAgent, NormalizedActor
 from replay_buffer import ReplayBufferSample
 from utils import Args
+from layers import mlp
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
 class GaussianActor(NormalizedActor):
-    def __init__(self, env):
-        super().__init__(env)
-        self.backbone = nn.Sequential(
-            nn.Linear(np.array(env.single_observation_space.shape).prod(), 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
+    def __init__(self, env, args: Args):
+        super().__init__(env, args)
+        self.backbone = mlp(
+            np.prod(env.single_observation_space.shape), 
+            [args.mlp_dim] * (args.num_layers - 1), 
+            args.mlp_dim
         )
-        self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
+        self.fc_mean = nn.Linear(args.mlp_dim, np.prod(env.single_action_space.shape))
+        self.fc_logstd = nn.Linear(args.mlp_dim, np.prod(env.single_action_space.shape))
 
     def get_gaussian_params(self, x):
         """
