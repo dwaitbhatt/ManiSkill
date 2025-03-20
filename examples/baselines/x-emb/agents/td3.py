@@ -16,11 +16,15 @@ from layers import mlp
 class DeterministicActor(NormalizedActor):
     def __init__(self, env, args: Args):
         super().__init__(env, args)
-        self.net = mlp(
-            np.prod(env.single_observation_space.shape), 
-            [args.mlp_dim] * args.num_layers,
-            np.prod(env.single_action_space.shape),
-            final_act=nn.Tanh()
+        self.net = nn.Sequential(
+            nn.Linear(np.array(env.single_observation_space.shape).prod(), 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, np.prod(env.single_action_space.shape)),
+            nn.Tanh()
         )
 
     def forward(self, x):
