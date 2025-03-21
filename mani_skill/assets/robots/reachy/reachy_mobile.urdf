@@ -16,31 +16,27 @@
     <parent link="base_footprint"/>
     <child link="base_link"/>
   </joint>
+  
   <!-- Robot Base -->
   <link name="base_link">
     <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.16" length="0.07"/>
+        <mesh filename="zuuu_description/meshes/mobile_base_visual.dae" />
       </geometry>
-      <material name="Cyan">
-        <color rgba="0 1.0 1.0 1.0"/>
-      </material>
     </visual>
-    <!-- <visual>
-      <origin rpy="0 0 0" xyz="0 0 -0.10749999999999998"/>
-      <geometry>
-        <mesh filename="zuuu_description/meshes/reachy_mobile_pauvre.dae"/>
-      </geometry>
-    </visual> -->
     <collision>
+      <origin xyz="0 0 0.13045" rpy="0 0 0"/>
       <geometry>
-        <cylinder length="0.07" radius="0.16"/>
+        <cylinder radius="0.245" length="0.2609"/>
       </geometry>
     </collision>
     <inertial>
-      <origin rpy="1.5707963267948966 0 0" xyz="0 0 0"/>
-      <mass value="20"/>
-      <inertia ixx="0.13616666666666666" ixy="0" ixz="0" iyy="0.13616666666666666" iyz="0" izz="0.256"/>
+      <origin xyz="0.008 -0.00048 0.112" rpy="0 0 0"/>
+      <mass value="24.0"/>
+      <inertia ixx="0.40791094" ixy="-0.00167148" ixz="-0.00178789"
+        iyx="-0.00167148" iyy="0.4236827" iyz="0.00026596"
+        izx="-0.00178789" izy="0.00026596" izz="0.70990763"/>
     </inertial>
   </link>
   <link name="drivewhl1_link">

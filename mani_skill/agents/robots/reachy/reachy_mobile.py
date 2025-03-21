@@ -25,7 +25,7 @@ REACHY_BASE_COLLISION_BIT = 31
 @register_agent()
 class ReachyMobile(BaseAgent):
     uid = "reachy_mobile"
-    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/reachy/reachy_mobile_old.urdf"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/reachy/reachy_mobile.urdf"
     urdf_config = dict(
         _materials=dict(
             gripper=dict(static_friction=2.0, dynamic_friction=2.0, restitution=0.0)
@@ -59,16 +59,6 @@ class ReachyMobile(BaseAgent):
                 near=0.01,
                 far=100,
                 entity_uid=self.camera_link_name,
-            ),
-            CameraConfig(
-                uid="reachy_right_hand",
-                pose=Pose.create_from_pq([-0.1, 0, 0.1], [1, 0, 0, 0]),
-                width=128,
-                height=128,
-                fov=2,
-                near=0.01,
-                far=100,
-                entity_uid="r_wrist2hand",
             ),
         ]
 
