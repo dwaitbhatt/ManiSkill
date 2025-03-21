@@ -23,9 +23,9 @@ REACHY_BASE_COLLISION_BIT = 31
 """Collision bit of the reachy base"""
 
 @register_agent()
-class ReachyMobile(BaseAgent):
-    uid = "reachy_mobile"
-    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/reachy/reachy_mobile.urdf"
+class Reachy2Mobile(BaseAgent):
+    uid = "reachy2_mobile"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/reachy/reachy2_mobile.urdf"
     urdf_config = dict(
         _materials=dict(
             gripper=dict(static_friction=2.0, dynamic_friction=2.0, restitution=0.0)
