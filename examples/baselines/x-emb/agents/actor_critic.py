@@ -12,10 +12,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env, args: Args):
+    def __init__(self, envs: ManiSkillVectorEnv, args: Args):
         super().__init__()
         self.net = mlp(
-            np.prod(env.single_observation_space.shape) + np.prod(env.single_action_space.shape), 
+            np.prod(envs.single_observation_space.shape) + np.prod(envs.single_action_space.shape), 
             [args.mlp_dim] * args.num_layers, 
             1
         )
@@ -32,9 +32,11 @@ class NormalizedActor(nn.Module):
     space limits in the forward pass using the `action_scale` and `action_bias` buffers.
     """
 
-    def __init__(self, env, args: Args):
+    def __init__(self, envs: ManiSkillVectorEnv, args: Args):
         super().__init__()
-        h, l = env.single_action_space.high, env.single_action_space.low
+        self.args = args
+
+        h, l = envs.single_action_space.high, envs.single_action_space.low
         self.register_buffer("action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32))
         self.register_buffer("action_bias", torch.tensor((h + l) / 2.0, dtype=torch.float32))
         # These buffers are persistent and will be saved in state_dict()
@@ -58,7 +60,15 @@ class NormalizedActor(nn.Module):
 
 
 class ActorCriticAgent:
-    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args, actor_class: Type[NormalizedActor]):
+    """
+    Base class for all actor-critic agents. 
+    For training, inherited agents must implement the `update_actor` and `update_critic` methods.
+    For evaluation, inherited agents must implement the `sample_action` method.
+    """
+
+    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args, 
+                 actor_class: Type[NormalizedActor],
+                 qf_class: Type[nn.Module] = SoftQNetwork):
         self.envs = envs
         self.device = device
         self.args = args
@@ -66,10 +76,10 @@ class ActorCriticAgent:
         self.actor = actor_class(envs, args).to(device)
         self.actor_target = actor_class(envs, args).to(device)
         
-        self.qf1 = SoftQNetwork(envs, args).to(device)
-        self.qf2 = SoftQNetwork(envs, args).to(device)
-        self.qf1_target = SoftQNetwork(envs, args).to(device)
-        self.qf2_target = SoftQNetwork(envs, args).to(device)
+        self.qf1 = qf_class(envs, args).to(device)
+        self.qf2 = qf_class(envs, args).to(device)
+        self.qf1_target = qf_class(envs, args).to(device)
+        self.qf2_target = qf_class(envs, args).to(device)
         
         if args.checkpoint is not None:
             ckpt = torch.load(args.checkpoint)
@@ -82,8 +92,8 @@ class ActorCriticAgent:
         self.qf1_target.load_state_dict(self.qf1.state_dict())
         self.qf2_target.load_state_dict(self.qf2.state_dict())
 
-        self.q_optimizer = optim.Adam(list(self.qf1.parameters()) + list(self.qf2.parameters()), lr=args.q_lr)
-        self.actor_optimizer = optim.Adam(list(self.actor.parameters()), lr=args.policy_lr)
+        self.q_optimizer = optim.Adam(list(self.qf1.parameters()) + list(self.qf2.parameters()), lr=args.lr)
+        self.actor_optimizer = optim.Adam(list(self.actor.parameters()), lr=args.lr)
 
         self.logging_tracker = {}
 
@@ -131,5 +141,14 @@ class ActorCriticAgent:
         """
         raise NotImplementedError
     
+    def get_eval_action(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Get the best action from the actor. This action will be used to evaluate the policy.
+        """
+        raise NotImplementedError
+    
     def save_model(self, model_path: str):
+        raise NotImplementedError
+    
+    def load_model(self, model_path: str):
         raise NotImplementedError

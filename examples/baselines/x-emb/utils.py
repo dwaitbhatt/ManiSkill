@@ -103,10 +103,8 @@ class Args:
     """the batch size of sample from the replay memory"""
     learning_starts: int = 4_000
     """timestep to start learning"""
-    policy_lr: float = 3e-4
+    lr: float = 3e-4
     """the learning rate of the policy network optimizer"""
-    q_lr: float = 3e-4
-    """the learning rate of the Q network network optimizer"""
     policy_frequency: int = 2
     """the frequency of training policy (delayed)"""
 
@@ -131,7 +129,23 @@ class Args:
     """the hidden dimension of the networks"""
     num_layers: int = 3
     """the number of hidden layers in the networks"""
+    simnorm_dim: int = 8
+    """the dimension of the simplicial normalization"""
+    enc_dim: int = 256
+    """the hidden dimension of the encoder networks"""
+    enc_lr_scale: float = 0.3
+    """the learning rate scale of the encoder networks"""
 
+    # Transfer learning specific parameters
+    latent_robot_obs_dim: int = 256
+    """the dimension of the latent observation"""
+    latent_env_obs_dim: int = 128
+    """the dimension of the latent observation"""
+    latent_action_dim: int = 256
+    """the dimension of the latent action"""
+    latent_dynamics_freq: int = 1000
+    """the frequency of updating the latent dynamics"""
+    
     training_freq: int = 64
     """training frequency (in steps)"""
     utd: float = 0.5
@@ -146,3 +160,5 @@ class Args:
     """the number of gradient updates per iteration"""
     steps_per_env: int = 0
     """the number of steps each parallel env takes per iteration"""
+    latent_obs_dim: int = 0
+    """the dimension of the latent observation (including robot and env obs)"""
