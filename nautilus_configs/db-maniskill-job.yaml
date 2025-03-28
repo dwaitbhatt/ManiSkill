@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
       - name: gpu-container
-        image: dhbhatt/maniskill-experiments:v4.1_tdmpc
+        image: dhbhatt/maniskill-experiments:latest
         command: ["/bin/bash", "-c"]
         args: [
           # "git pull && \
@@ -76,12 +76,12 @@ spec:
         resources:
           limits:
             nvidia.com/gpu: "1"
-            memory: "24G"
-            cpu: "16"
+            memory: "9G"
+            cpu: "3"
           requests:
             nvidia.com/gpu: "1"
-            memory: "12G"
-            cpu: "10"
+            memory: "8G"
+            cpu: "2"
       affinity:
         # nodeAffinity:
         # nodeSelectorTerms:
@@ -106,8 +106,53 @@ spec:
               - key: kubernetes.io/hostname
                 operator: In
                 values:
+                - "ry-gpu-01.sdsc.optiputer.net"
+                - "ry-gpu-02.sdsc.optiputer.net"
+                - "ry-gpu-03.sdsc.optiputer.net"
+                - "ry-gpu-04.sdsc.optiputer.net"
+                - "ry-gpu-05.sdsc.optiputer.net"
+                - "ry-gpu-06.sdsc.optiputer.net"
+                - "ry-gpu-07.sdsc.optiputer.net"
+                - "ry-gpu-08.sdsc.optiputer.net"
+                - "ry-gpu-09.sdsc.optiputer.net"
                 - "ry-gpu-10.sdsc.optiputer.net"
-                - "k8s-gpu-03.sdsc.optiputer.net"
+                - "ry-gpu-11.sdsc.optiputer.net"
+                - "ry-gpu-12.sdsc.optiputer.net"
+                - "ry-gpu-13.sdsc.optiputer.net"
+                - "ry-gpu-14.sdsc.optiputer.net"
+                - "ry-gpu-15.sdsc.optiputer.net"
+                - "ry-gpu-16.sdsc.optiputer.net"
+                - "k8s-3090-01.calit2.optiputer.net"
+                - "k8s-4090-01.calit2.optiputer.net"
+                - "k8s-4090-02.calit2.optiputer.net"
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - "k8s-haosu-02.sdsc.optiputer.net"
+                - "k8s-haosu-03.sdsc.optiputer.net"
+                - "k8s-haosu-04.sdsc.optiputer.net"
+                - "k8s-haosu-05.sdsc.optiputer.net"
+                - "k8s-haosu-06.sdsc.optiputer.net"
+                - "k8s-haosu-07.sdsc.optiputer.net"
+                - "k8s-haosu-08.sdsc.optiputer.net"
+                - "k8s-haosu-09.sdsc.optiputer.net"
+                - "k8s-haosu-10.sdsc.optiputer.net"
+                - "k8s-haosu-11.sdsc.optiputer.net"
+                - "k8s-haosu-12.sdsc.optiputer.net"
+                - "k8s-haosu-13.sdsc.optiputer.net"
+                - "k8s-haosu-14.sdsc.optiputer.net"
+                - "k8s-haosu-15.sdsc.optiputer.net"
+                - "k8s-haosu-16.sdsc.optiputer.net"
+                - "k8s-haosu-17.sdsc.optiputer.net"
+                - "k8s-haosu-18.sdsc.optiputer.net"
+                - "k8s-haosu-19.sdsc.optiputer.net"
+                - "k8s-haosu-20.sdsc.optiputer.net"
+                - "k8s-haosu-21.sdsc.optiputer.net"
+                - "k8s-haosu-22.sdsc.optiputer.net"
+                - "k8s-haosu-23.sdsc.optiputer.net"
           - weight: 80
             preference:
               matchExpressions:
@@ -115,26 +160,37 @@ spec:
                 operator: In
                 values:
                 - "NVIDIA-A100-80GB-PCIe"
-                - "NVIDIA-A100-SXM4-80GB"      
+                - "NVIDIA-A100-SXM4-80GB"
+                - "NVIDIA-A100-80GB-PCIe-MIG-1g.10gb"
+                - "NVIDIA-A100-PCIE-40GB"
+                - "NVIDIA-RTX-A6000"
+                - "NVIDIA-RTX-A5000"
                 - "NVIDIA-GeForce-RTX-4090"
+                - "NVIDIA-GeForce-RTX-4080"
+                - "NVIDIA-GeForce-RTX-3090-Ti"
                 - "NVIDIA-GeForce-RTX-3090"
-          - weight: 15
+                - "NVIDIA-GeForce-RTX-3080-Ti"
+                - "NVIDIA-GeForce-RTX-3080"
+          - weight: 60
             preference:
               matchExpressions:
               - key: nvidia.com/gpu.product
                 operator: In
                 values:
                 - "NVIDIA-A40"
-                - "NVIDIA-A10"
                 - "Tesla-V100-SXM2-32GB"
-          - weight: 5
+                - "Tesla-V100-PCIE-16GB"
+          - weight: 50
             preference:
               matchExpressions:
               - key: nvidia.com/gpu.product
                 operator: In
                 values:
-                - "NVIDIA_TITAN_RTX"
-                - "NVIDIA-RTX-A6000"
+                - "NVIDIA-TITAN-RTX"
+                - "NVIDIA-GeForce-RTX-2080-Ti"
+                - "NVIDIA-TITAN-Xp"
+                - "NVIDIA-L40"
+                - "NVIDIA-A10"
       restartPolicy: Never
       volumes:
         - name: db-cephfs-volume
