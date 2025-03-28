@@ -15,15 +15,15 @@ LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
 class GaussianActor(NormalizedActor):
-    def __init__(self, env, args: Args):
-        super().__init__(env, args)
+    def __init__(self, envs: ManiSkillVectorEnv, args: Args):
+        super().__init__(envs, args)
         self.backbone = mlp(
-            np.prod(env.single_observation_space.shape), 
+            np.prod(envs.single_observation_space.shape), 
             [args.mlp_dim] * (args.num_layers - 1), 
             args.mlp_dim
         )
-        self.fc_mean = nn.Linear(args.mlp_dim, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(args.mlp_dim, np.prod(env.single_action_space.shape))
+        self.fc_mean = nn.Linear(args.mlp_dim, np.prod(envs.single_action_space.shape))
+        self.fc_logstd = nn.Linear(args.mlp_dim, np.prod(envs.single_action_space.shape))
 
     def get_gaussian_params(self, x):
         """
@@ -76,12 +76,15 @@ class SACAgent(ActorCriticAgent):
             self.target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
             self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
             self.alpha = self.log_alpha.exp().item()
-            self.a_optimizer = optim.Adam([self.log_alpha], lr=args.q_lr)
+            self.a_optimizer = optim.Adam([self.log_alpha], lr=args.lr)
         else:
             self.alpha = args.alpha
 
     def sample_action(self, obs: torch.Tensor) -> torch.Tensor:
         return self.actor(obs)[0]
+    
+    def get_eval_action(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.actor.get_eval_action(obs)
     
     def update_critic(self, data: ReplayBufferSample, global_step: int):
         # update the value networks
@@ -145,4 +148,12 @@ class SACAgent(ActorCriticAgent):
             'log_alpha': self.log_alpha,
         }, model_path)
         print(f"model saved to {model_path}")
+
+    def load_model(self, model_path: str):
+        checkpoint = torch.load(model_path)
+        self.actor.load_state_dict(checkpoint['actor'])
+        self.qf1_target.load_state_dict(checkpoint['qf1'])
+        self.qf2_target.load_state_dict(checkpoint['qf2'])
+        self.log_alpha = checkpoint['log_alpha']
+        print(f"model loaded from {model_path}")
     

@@ -13,7 +13,7 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
 from utils import Args, Logger
 from replay_buffer import ReplayBuffer
-from agents import ActorCriticAgent, TD3Agent, SACAgent
+from agents import ActorCriticAgent, TD3Agent, SACAgent, SACTransferAgent
 
 import gymnasium as gym
 import numpy as np
@@ -30,7 +30,7 @@ def evaluate(agent: ActorCriticAgent, eval_envs: gym.Env, args: Args, logger: Lo
     num_episodes = 0
     for _ in range(args.num_eval_steps):
         with torch.no_grad():
-            eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.actor.get_eval_action(eval_obs))
+            eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(agent.get_eval_action(eval_obs))
             if "final_info" in eval_infos:
                 mask = eval_infos["_final_info"]
                 num_episodes += mask.sum()
@@ -154,6 +154,8 @@ if __name__ == "__main__":
         agent = TD3Agent(envs, device, args)
     elif args.algorithm == "SAC":
         agent = SACAgent(envs, device, args)
+    elif args.algorithm == "SAC_LATENT":
+        agent = SACTransferAgent(envs, device, args)
     else:
         raise ValueError(f"Algorithm {args.algorithm} not supported")
 
