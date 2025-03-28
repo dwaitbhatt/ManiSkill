@@ -75,7 +75,24 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() and args.cuda else "cpu")
+    # if torch.cuda.is_available() and args.cuda:
+    #     if torch.cuda.device_count() > 1:
+    #         print(f"Found {torch.cuda.device_count()} CUDA devices")
+    #         # Use the device with the most free memory
+    #         free_mem = []
+    #         for i in range(torch.cuda.device_count()):
+    #             torch.cuda.set_device(i)
+    #             free_mem.append(torch.cuda.get_device_properties(i).total_memory - torch.cuda.memory_allocated(i))
+    #         device_id = free_mem.index(max(free_mem))
+    #         device = torch.device(f"cuda:{device_id}")
+    #         print(f"Using CUDA device {device_id}")
+    #     else:
+    #         device = torch.device("cuda")
+    #         print("Using CUDA device 0")
+    # else:
+    #     device = torch.device("cpu")
+    #     print("Using CPU")
 
     ####### Environment setup #######
     env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
