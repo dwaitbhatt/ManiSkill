@@ -138,11 +138,13 @@ class SACTransferAgent(ActorCriticAgent):
         self.latent_optimizers = torch.optim.Adam([
             {'params': self.latent_dynamics.parameters()},
             {'params': self.rew_predictor.parameters()},
-            {'params': self.robot_obs_encoder.parameters(), 'lr': args.enc_lr_scale * args.lr},
-            {'params': self.env_obs_encoder.parameters(), 'lr': args.enc_lr_scale * args.lr},
-            {'params': self.act_encoder.parameters(), 'lr': args.enc_lr_scale * args.lr},
-            {'params': self.act_decoder.parameters(), 'lr': args.enc_lr_scale * args.lr},
         ], lr=args.lr)
+        self.obs_encoder_optimizer = torch.optim.Adam([
+            {'params': self.robot_obs_encoder.parameters()},
+            {'params': self.env_obs_encoder.parameters()},
+        ], lr=args.lr * args.enc_lr_scale)
+        self.act_encoder_optimizer = torch.optim.Adam(self.act_encoder.parameters(), lr=args.lr * args.enc_lr_scale)
+        self.act_decoder_optimizer = torch.optim.Adam(self.act_decoder.parameters(), lr=args.lr * args.enc_lr_scale)
 
         super().__init__(envs, device, args, actor_class=LatentGaussianActor, qf_class=SoftLatentObsQNetwork)
         if args.autotune:
@@ -306,9 +308,6 @@ class SACTransferAgent(ActorCriticAgent):
             global_update += 1
             data = rb.sample(self.args.batch_size)
 
-            self.latent_optimizers.zero_grad()
-
-            self.update_actor(data, global_step)
 
             critic_loss = self.get_critic_loss(data, global_step)
             latent_dynamics_loss = self.get_latent_dynamics_loss(data, global_step)
@@ -316,10 +315,19 @@ class SACTransferAgent(ActorCriticAgent):
             total_latent_loss = critic_loss + latent_dynamics_loss + rew_predictor_loss
 
             self.q_optimizer.zero_grad()
+            self.latent_optimizers.zero_grad()
+            self.obs_encoder_optimizer.zero_grad()
+            self.act_encoder_optimizer.zero_grad()
+
             total_latent_loss.backward()
             self.q_optimizer.step()
-
             self.latent_optimizers.step()
+            self.obs_encoder_optimizer.step()
+            self.act_encoder_optimizer.step()
+
+            self.act_decoder_optimizer.zero_grad()
+            self.update_actor(data, global_step)
+            self.act_decoder_optimizer.step()
 
             self.update_target_networks()
 
