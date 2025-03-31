@@ -133,7 +133,7 @@ class Args:
     """the dimension of the simplicial normalization"""
     enc_dim: int = 256
     """the hidden dimension of the encoder networks"""
-    enc_lr_scale: float = 0.3
+    enc_lr_scale: float = 1
     """the learning rate scale of the encoder networks"""
 
     # Transfer learning specific parameters
