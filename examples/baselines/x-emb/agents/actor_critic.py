@@ -82,10 +82,7 @@ class ActorCriticAgent:
         self.qf2_target = qf_class(envs, args).to(device)
         
         if args.checkpoint is not None:
-            ckpt = torch.load(args.checkpoint)
-            self.actor.load_state_dict(ckpt['actor'])
-            self.qf1.load_state_dict(ckpt['qf1'])
-            self.qf2.load_state_dict(ckpt['qf2'])
+            self.load_model(args.checkpoint)
         else:
             self.initialize_networks()
 
