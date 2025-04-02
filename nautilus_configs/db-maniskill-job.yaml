@@ -77,7 +77,7 @@ spec:
           limits:
             nvidia.com/gpu: "1"
             memory: "9G"
-            cpu: "3"
+            cpu: "2.4"
           requests:
             nvidia.com/gpu: "1"
             memory: "8G"
