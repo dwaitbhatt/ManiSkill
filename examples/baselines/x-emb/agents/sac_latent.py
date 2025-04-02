@@ -10,7 +10,7 @@ import torch.optim as optim
 
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
-from .actor_critic import ActorCriticAgent
+from .actor_critic import ActorCriticAgent, NormalizedActor
 from replay_buffer import ReplayBuffer, ReplayBufferSample
 from utils import Args
 from layers import mlp, weight_init, SimNorm
@@ -88,6 +88,19 @@ class SoftLatentObsQNetwork(nn.Module):
         x = torch.cat([x, a], 1)
         return self.net(x)
 
+class ActionDecoder(NormalizedActor):
+    def __init__(self, envs: ManiSkillVectorEnv, args: Args):
+        super().__init__(envs, args)
+        self.net = mlp(
+            args.latent_obs_dim + args.latent_action_dim,
+            [args.mlp_dim] * args.num_layers,
+            np.prod(envs.single_action_space.shape),
+        )
+
+    def forward(self, x):
+        x = torch.tanh(self.net(x)) * self.action_scale + self.action_bias
+        return x
+
 
 class SACTransferAgent(ActorCriticAgent):
     def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args):
@@ -97,7 +110,7 @@ class SACTransferAgent(ActorCriticAgent):
 
         self.env_obs_dim = envs.single_observation_space.shape[0] - self.robot_obs_dim
         self.latent_obs_dim = args.latent_robot_obs_dim + args.latent_env_obs_dim
-        args.latent_obs_dim = self.latent_obs_dim
+        setattr(args, 'latent_obs_dim', self.latent_obs_dim)
 
         self.latent_dynamics = mlp(
             self.latent_obs_dim + args.latent_action_dim,
@@ -129,11 +142,7 @@ class SACTransferAgent(ActorCriticAgent):
             args.latent_action_dim,
             final_act=SimNorm(args)
         ).to(device)
-        self.act_decoder = mlp(
-            self.latent_obs_dim + args.latent_action_dim,
-            [args.mlp_dim] * args.num_layers,
-            np.prod(envs.single_action_space.shape),
-        ).to(device)
+        self.act_decoder = ActionDecoder(envs, args).to(device)
 
         self.latent_optimizers = torch.optim.Adam([
             {'params': self.latent_dynamics.parameters()},
