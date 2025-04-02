@@ -19,21 +19,36 @@ torch.autograd.set_detect_anomaly(True)
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
-class LatentGaussianActor(nn.Module):
+class LatentGaussianActor(NormalizedActor):
     """
     The actor network for the latent space. Note that this is not a normalized actor, since it
     operates in the latent space. Latent actions are SimNormed.
     """
-    def __init__(self, envs: ManiSkillVectorEnv, args: Args):
-        super().__init__()
+    def __init__(self, envs: ManiSkillVectorEnv, args: Args, latent_obs: bool = True, latent_act: bool = True):
+        super().__init__(envs, args)
         self.args = args
+
+        self.latent_obs = latent_obs
+        self.latent_act = latent_act
+        if self.latent_obs:
+            input_dim = args.latent_obs_dim
+        else:
+            input_dim = np.prod(envs.single_observation_space.shape)
+
+        if self.latent_act:
+            output_dim = args.latent_action_dim
+        else:
+            output_dim = np.prod(envs.single_action_space.shape)
+            
         self.backbone = mlp(
-            args.latent_obs_dim,
+            input_dim,
             [args.mlp_dim] * (args.num_layers - 1), 
             args.mlp_dim
         )
-        self.fc_mean = nn.Linear(args.mlp_dim, args.latent_action_dim)
-        self.fc_logstd = nn.Linear(args.mlp_dim, args.latent_action_dim)
+        self.fc_mean = nn.Linear(args.mlp_dim, output_dim)
+        self.fc_logstd = nn.Linear(args.mlp_dim, output_dim)
+
+        self.simnorm = SimNorm(args)
 
     def get_gaussian_params(self, x):
         """
@@ -59,20 +74,30 @@ class LatentGaussianActor(nn.Module):
         std = log_std.exp()
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-
-        latent_action = SimNorm(self.args)(x_t)
-
         log_prob = normal.log_prob(x_t)
+
+        if self.latent_act:
+            sampled_action = self.simnorm(x_t)
+            mean_action = self.simnorm(mean)
+        else:
+            y_t = torch.tanh(x_t)
+            sampled_action = y_t * self.action_scale + self.action_bias
+            # Enforcing Action Bound
+            log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+            mean_action = torch.tanh(mean) * self.action_scale + self.action_bias
+
         log_prob = log_prob.sum(1, keepdim=True)
 
-        latent_mean = SimNorm(self.args)(mean)
-        return latent_action, log_prob, latent_mean
+        return sampled_action, log_prob, mean_action
 
     def get_eval_action(self, x):
         x = self.backbone(x)
         mean = self.fc_mean(x)
-        latent_mean = SimNorm(self.args)(mean)
-        return latent_mean
+        if self.latent_act:
+            mean_action = self.simnorm(mean)
+        else:
+            mean_action = torch.tanh(mean) * self.action_scale + self.action_bias
+        return mean_action
 
 
 class SoftLatentObsQNetwork(nn.Module):
@@ -109,51 +134,70 @@ class SACTransferAgent(ActorCriticAgent):
             self.robot_obs_dim += len(v[0])
 
         self.env_obs_dim = envs.single_observation_space.shape[0] - self.robot_obs_dim
-        self.latent_obs_dim = args.latent_robot_obs_dim + args.latent_env_obs_dim
+
+        if not args.disable_obs_encoders:
+            self.latent_obs_dim = args.latent_robot_obs_dim + args.latent_env_obs_dim
+            self.robot_obs_encoder = mlp(
+                self.robot_obs_dim,
+                [args.enc_dim] * (args.num_layers - 1),
+                args.latent_robot_obs_dim,
+                final_act=SimNorm(args)
+            ).to(device)
+            self.env_obs_encoder = mlp(
+                self.env_obs_dim,
+                [args.enc_dim] * (args.num_layers - 1),
+                args.latent_env_obs_dim,
+                final_act=SimNorm(args)
+            ).to(device)
+            self.obs_encoder_optimizer = torch.optim.Adam([
+                {'params': self.robot_obs_encoder.parameters()},
+                {'params': self.env_obs_encoder.parameters()},
+            ], lr=args.lr * args.enc_lr_scale)
+        else:
+            self.latent_obs_dim = np.prod(envs.single_observation_space.shape)
+            self.robot_obs_encoder = nn.Identity()
+            self.env_obs_encoder = nn.Identity()
         setattr(args, 'latent_obs_dim', self.latent_obs_dim)
 
-        self.latent_dynamics = mlp(
-            self.latent_obs_dim + args.latent_action_dim,
-            [args.mlp_dim] * args.num_layers,
-            self.latent_obs_dim,
-            final_act=SimNorm(args)
-        ).to(device)
-        self.rew_predictor = mlp(
-            self.latent_obs_dim + args.latent_action_dim,
-            [args.mlp_dim] * args.num_layers,
-            1
-        ).to(device)
-        
-        self.robot_obs_encoder = mlp(
-            self.robot_obs_dim,
-            [args.enc_dim] * (args.num_layers - 1),
-            args.latent_robot_obs_dim,
-            final_act=SimNorm(args)
-        ).to(device)
-        self.env_obs_encoder = mlp(
-            self.env_obs_dim,
-            [args.enc_dim] * (args.num_layers - 1),
-            args.latent_env_obs_dim,
-            final_act=SimNorm(args)
-        ).to(device)
-        self.act_encoder = mlp(
-            np.prod(envs.single_observation_space.shape) + np.prod(envs.single_action_space.shape),
-            [args.enc_dim] * (args.num_layers - 1),
-            args.latent_action_dim,
-            final_act=SimNorm(args)
-        ).to(device)
-        self.act_decoder = ActionDecoder(envs, args).to(device)
+        self.ldyn_rew_act_dim = None
+        if not args.disable_act_encoder:
+            self.act_encoder = mlp(
+                np.prod(envs.single_observation_space.shape) + np.prod(envs.single_action_space.shape),
+                [args.enc_dim] * (args.num_layers - 1),
+                args.latent_action_dim,
+                final_act=SimNorm(args)
+            ).to(device)
+            self.act_encoder_optimizer = torch.optim.Adam(self.act_encoder.parameters(), lr=args.lr * args.enc_lr_scale)
+            self.ldyn_rew_act_dim = args.latent_action_dim
+        else:
+            self.act_encoder = nn.Identity()
+            self.ldyn_rew_act_dim = np.prod(envs.single_action_space.shape)
 
-        self.latent_optimizers = torch.optim.Adam([
-            {'params': self.latent_dynamics.parameters()},
-            {'params': self.rew_predictor.parameters()},
-        ], lr=args.lr)
-        self.obs_encoder_optimizer = torch.optim.Adam([
-            {'params': self.robot_obs_encoder.parameters()},
-            {'params': self.env_obs_encoder.parameters()},
-        ], lr=args.lr * args.enc_lr_scale)
-        self.act_encoder_optimizer = torch.optim.Adam(self.act_encoder.parameters(), lr=args.lr * args.enc_lr_scale)
-        self.act_decoder_optimizer = torch.optim.Adam(self.act_decoder.parameters(), lr=args.lr * args.enc_lr_scale)
+        if not args.disable_latent_dynamics:
+            self.latent_dynamics = mlp(
+                self.latent_obs_dim + self.ldyn_rew_act_dim,
+                [args.mlp_dim] * args.num_layers,
+                self.latent_obs_dim,
+                final_act=SimNorm(args) if not args.disable_obs_encoders else None
+            ).to(device)
+            self.latent_dynamics_optimizer = torch.optim.Adam(self.latent_dynamics.parameters(), lr=args.lr)
+        else:
+            self.latent_dynamics = nn.Identity()
+        if not args.disable_rew_predictor:
+            self.rew_predictor = mlp(
+                self.latent_obs_dim + self.ldyn_rew_act_dim,
+                [args.mlp_dim] * args.num_layers,
+                1
+            ).to(device)
+            self.rew_predictor_optimizer = torch.optim.Adam(self.rew_predictor.parameters(), lr=args.lr)
+        else:
+            self.rew_predictor = nn.Identity()
+
+        if not args.disable_act_decoder:
+            self.act_decoder = ActionDecoder(envs, args).to(device)
+            self.act_decoder_optimizer = torch.optim.Adam(self.act_decoder.parameters(), lr=args.lr * args.enc_lr_scale)
+        else:
+            self.act_decoder = nn.Identity()
 
         super().__init__(envs, device, args, actor_class=LatentGaussianActor, qf_class=SoftLatentObsQNetwork)
         if args.autotune:
@@ -164,8 +208,15 @@ class SACTransferAgent(ActorCriticAgent):
         else:
             self.alpha = args.alpha
 
-        self.latent_actor: LatentGaussianActor = self.actor
-        self.latent_actor_optimizer = self.actor_optimizer
+        del self.actor
+        del self.actor_optimizer
+
+        self.latent_actor = LatentGaussianActor(envs, args, 
+                                                latent_obs=not args.disable_obs_encoders, 
+                                                latent_act=not args.disable_act_decoder).to(device)
+        self.actor = self.latent_actor
+        self.latent_actor_optimizer = optim.Adam(self.latent_actor.parameters(), lr=args.lr)
+
 
     def initialize_networks(self):
         super().initialize_networks()
@@ -184,10 +235,16 @@ class SACTransferAgent(ActorCriticAgent):
         return torch.cat([latent_robot_obs, latent_env_obs], dim=-1)
     
     def encode_action(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        return self.act_encoder(torch.cat([obs, action], dim=-1))
+        if not self.args.disable_act_encoder:
+            action = self.act_encoder(torch.cat([obs, action], dim=-1))
+        return action
     
     def decode_action(self, latent_obs: torch.Tensor, latent_action: torch.Tensor) -> torch.Tensor:
-        return self.act_decoder(torch.cat([latent_obs, latent_action], dim=-1))
+        if self.args.disable_act_decoder:
+            action = latent_action
+        else:
+            action = self.act_decoder(torch.cat([latent_obs, latent_action], dim=-1))
+        return action
     
     def sample_action(self, obs: torch.Tensor) -> torch.Tensor:
         latent_obs = self.encode_obs(obs)
@@ -281,6 +338,10 @@ class SACTransferAgent(ActorCriticAgent):
         # self.obs_encoder_optimizer.step()
         # self.act_encoder_optimizer.step()
         # self.latent_dynamics_optimizer.step()
+
+        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker["losses/latent_dynamics_loss"] = latent_dynamics_loss.item()
+
         return latent_dynamics_loss
 
     def get_rew_predictor_loss(self, data: ReplayBufferSample, global_step: int):
@@ -297,6 +358,10 @@ class SACTransferAgent(ActorCriticAgent):
         # self.obs_encoder_optimizer.step()
         # self.act_encoder_optimizer.step()
         # self.rew_predictor_optimizer.step()
+
+        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker["losses/rew_predictor_loss"] = rew_loss.item()
+
         return rew_loss
 
     def update(self, rb: ReplayBuffer, global_update: int, global_step: int):
@@ -319,24 +384,41 @@ class SACTransferAgent(ActorCriticAgent):
 
 
             critic_loss = self.get_critic_loss(data, global_step)
-            latent_dynamics_loss = self.get_latent_dynamics_loss(data, global_step)
-            rew_predictor_loss = self.get_rew_predictor_loss(data, global_step)
+            
+            latent_dynamics_loss, rew_predictor_loss = 0, 0
+            if not self.args.disable_latent_dynamics:
+                latent_dynamics_loss = self.get_latent_dynamics_loss(data, global_step)
+            if not self.args.disable_rew_predictor:
+                rew_predictor_loss = self.get_rew_predictor_loss(data, global_step)
+            
             total_latent_loss = critic_loss + latent_dynamics_loss + rew_predictor_loss
 
             self.q_optimizer.zero_grad()
-            self.latent_optimizers.zero_grad()
-            self.obs_encoder_optimizer.zero_grad()
-            self.act_encoder_optimizer.zero_grad()
+            if not self.args.disable_obs_encoders:
+                self.obs_encoder_optimizer.zero_grad()
+            if not self.args.disable_latent_dynamics:
+                self.latent_dynamics_optimizer.zero_grad()
+            if not self.args.disable_rew_predictor:
+                self.rew_predictor_optimizer.zero_grad()
+            if not self.args.disable_act_encoder:
+                self.act_encoder_optimizer.zero_grad()
 
             total_latent_loss.backward()
             self.q_optimizer.step()
-            self.latent_optimizers.step()
-            self.obs_encoder_optimizer.step()
-            self.act_encoder_optimizer.step()
-
-            self.act_decoder_optimizer.zero_grad()
+            if not self.args.disable_obs_encoders:
+                self.obs_encoder_optimizer.step()
+            if not self.args.disable_latent_dynamics:
+                self.latent_dynamics_optimizer.step()
+            if not self.args.disable_rew_predictor:
+                self.rew_predictor_optimizer.step()
+            if not self.args.disable_act_encoder:
+                self.act_encoder_optimizer.step()
+            
+            if not self.args.disable_act_decoder:
+                self.act_decoder_optimizer.zero_grad()
             self.update_actor(data, global_step)
-            self.act_decoder_optimizer.step()
+            if not self.args.disable_act_decoder:
+                self.act_decoder_optimizer.step()
 
             self.update_target_networks()
 

@@ -81,7 +81,7 @@ class Args:
     """how often to reconfigure the environment during training"""
     eval_reconfiguration_freq: Optional[int] = 1
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
-    eval_freq: int = 25
+    eval_freq: int = 5000
     """evaluation frequency in terms of iterations"""
     save_train_video_freq: Optional[int] = None
     """frequency to save training videos in terms of iterations"""
@@ -145,7 +145,19 @@ class Args:
     """the dimension of the latent action"""
     latent_dynamics_freq: int = 1000
     """the frequency of updating the latent dynamics"""
-    
+
+    # Ablation specific parameters
+    disable_latent_dynamics: bool = False
+    """whether to disable the latent dynamics"""
+    disable_rew_predictor: bool = False
+    """whether to disable the reward predictor"""
+    disable_act_encoder: bool = False
+    """whether to disable the action encoder"""
+    disable_act_decoder: bool = False
+    """whether to disable the action decoder"""
+    disable_obs_encoders: bool = False
+    """whether to disable the observation encoders"""
+
     training_freq: int = 64
     """training frequency (in steps)"""
     utd: float = 0.5
