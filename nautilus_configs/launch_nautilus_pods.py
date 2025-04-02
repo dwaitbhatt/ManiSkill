@@ -64,7 +64,8 @@ class NautilusPodConfig:
     """Wandb project name"""
     
     extra: str = ""
-    """Extra command line arguments to pass to the experiment"""
+    """Extra command line arguments to pass to the training script, which will override default values.
+    Format: '--arg1 value1 --arg2 value2' or '--arg1=value1 --arg2=value2'."""
 
 
 def generate_experiment_name(env_id: str, robot: str, algo: Algorithm, suffix: str = "") -> str:
@@ -84,67 +85,90 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
     """Generate the command based on the algorithm and parameters."""
     timestamp_log = "$(date +%Y-%m-%d_%H-%M-%S)"
     
-    git_commands = f'''git fetch origin {branch} && git reset --hard origin/{branch} && '''    
-    wandb_args = f'''--wandb-entity {wandb_entity} --wandb-project-name {wandb_project} --exp_name {run_name} --wandb_group {exp_name}'''
+    # Git commands to reset to the specified branch
+    git_commands = f'''git fetch origin {branch} && git reset --hard origin/{branch} && '''
     
-    if algo == Algorithm.SAC or algo == Algorithm.TD3:
-        return f'''{git_commands}
-echo y | python examples/baselines/x-emb/train_source.py \\
-       {wandb_args} \\
-       --algorithm {algo.value.upper()} \\
-       --env-id {env_id} \\
-       --robot {robot} \\
-       --control_mode pd_joint_vel \\
-       --seed {seed} \\
-       --num-envs 128 \\
-       --training-freq 128 \\
-       --num-eval-steps 100 \\
-       --eval-freq 50_000 \\
-       --total-timesteps {total_timesteps} \\
-       --wandb-video-freq 2 \\
-       --track \\
-       {extra_cmd_args} \\
-  > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
+    # Parse extra command arguments into a dictionary
+    extra_args_dict = {}
+    if extra_cmd_args:
+        for arg in extra_cmd_args.split():
+            if arg.startswith('--'):
+                key = arg[2:]  # Remove leading --
+                if '=' in key:
+                    key, value = key.split('=', 1)
+                    extra_args_dict[key] = value
+                else:
+                    # Next argument might be a value or another flag
+                    extra_args_dict[key] = True
+            elif extra_args_dict:
+                # If the previous item was a key, and this isn't a flag, it's a value
+                last_key = list(extra_args_dict.keys())[-1]
+                if extra_args_dict[last_key] is True:  # Only update if it was a placeholder
+                    extra_args_dict[last_key] = arg
+    
+    # Common wandb arguments for all algorithms
+    wandb_args = {
+        'wandb-entity': wandb_entity,
+        'wandb-project-name': wandb_project,
+        'exp_name': run_name,
+        'wandb_group': exp_name,
+        'track': True,
+    }
+    
+    if algo == Algorithm.SAC or algo == Algorithm.TD3 or algo == Algorithm.SAC_LATENT:
+        # Base arguments for SAC/TD3
+        cmd_args = {
+            **wandb_args,
+            'algorithm': algo.value.upper(),
+            'env-id': env_id,
+            'robot': robot,
+            'control_mode': 'pd_joint_vel',
+            'seed': str(seed),
+            'num-envs': '128',
+            'training-freq': '128',
+            'num-eval-steps': '100',
+            'eval-freq': '50_000',
+            'total-timesteps': total_timesteps,
+            'wandb-video-freq': '2',
+        }
+        
+        # Override with any extra arguments
+        cmd_args.update(extra_args_dict)
+        
+        # Build the command string
+        args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
+        return f'''{git_commands} 
+                    echo y | python examples/baselines/x-emb/train_source.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
     
     elif algo == Algorithm.PPO:
+        # Base arguments for PPO
+        cmd_args = {
+            **wandb_args,
+            'env_id': env_id,
+            'robot_uids': robot,
+            'control_mode': 'pd_joint_vel',
+            'seed': str(seed),
+            'num_envs': '512',
+            'num_eval_envs': '8',
+            'eval_freq': '10',
+            'total_timesteps': total_timesteps,
+            'num_steps': '50',
+            'num_minibatches': '32',
+            'num_eval_steps': '50',
+            'gamma': '0.8',
+            'update_epochs': '4',
+            'wandb_video_freq': '2',
+        }
+        
+        # Override with any extra arguments
+        cmd_args.update(extra_args_dict)
+        
+        # Build the command string
+        args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
         return f'''{git_commands}
-echo y | python examples/baselines/ppo/ppo.py \\
-       {wandb_args} \\
-       --env_id={env_id} \\
-       --robot_uids={robot} \\
-       --control_mode=pd_joint_vel \\
-       --seed={seed} \\
-       --num_envs=512 \\
-       --num_eval_envs=8 \\
-       --eval_freq=10 \\
-       --total_timesteps={total_timesteps} \\
-       --num_steps=50 \\
-       --num_minibatches=32 \\
-       --num_eval_steps=50 \\
-       --gamma=0.8 \\
-       --update_epochs=4 \\
-       --track \\
-       --wandb_video_freq=2 \\
-       {extra_cmd_args} \\
-  > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-
-    elif algo == Algorithm.SAC_LATENT:
-        return f'''{git_commands}
-echo y | python examples/baselines/x-emb/train_source.py \\
-       {wandb_args} \\
-       --algorithm {algo.value.upper()} \\
-       --env-id {env_id} \\
-       --robot {robot} \\
-       --control_mode pd_joint_vel \\
-       --seed {seed} \\
-       --num-envs 128 \\
-       --training-freq 128 \\
-       --num-eval-steps 100 \\
-       --eval-freq 50_000 \\
-       --total-timesteps {total_timesteps} \\
-       --wandb-video-freq 2 \\
-       --track \\
-  > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
+                    echo y | python examples/baselines/ppo/ppo.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
     
     elif algo == Algorithm.DUMMY:
         return f"{git_commands} sleep infinity"
