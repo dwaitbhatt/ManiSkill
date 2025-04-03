@@ -163,10 +163,6 @@ if __name__ == "__main__":
     global_update = 0
     learning_has_started = False
 
-    global_steps_per_iteration = args.num_envs * (args.steps_per_env)
-    pbar = tqdm.tqdm(range(args.total_timesteps))
-    cumulative_times = defaultdict(float)
-
     if args.algorithm == "TD3":
         agent = TD3Agent(envs, device, args)
     elif args.algorithm == "SAC":
@@ -175,6 +171,11 @@ if __name__ == "__main__":
         agent = SACTransferAgent(envs, device, args)
     else:
         raise ValueError(f"Algorithm {args.algorithm} not supported")
+    print(f"\n\n\n############# Network architecture: ##############\n{agent}\n\n\n")
+
+    global_steps_per_iteration = args.num_envs * (args.steps_per_env)
+    pbar = tqdm.tqdm(range(args.total_timesteps))
+    cumulative_times = defaultdict(float)
 
     while global_step < args.total_timesteps:
         if args.eval_freq > 0 and (global_step - args.training_freq) // args.eval_freq < global_step // args.eval_freq:
