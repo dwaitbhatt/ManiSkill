@@ -34,6 +34,7 @@ class DeterministicActor(NormalizedActor):
 class TD3Agent(ActorCriticAgent):
     def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args):
         super().__init__(envs, device, args, actor_class=DeterministicActor)
+        self.actor_target = DeterministicActor(envs, args).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
 
     def sample_action(self, obs: torch.Tensor) -> torch.Tensor:
@@ -42,6 +43,11 @@ class TD3Agent(ActorCriticAgent):
             # Add exploration noise
             noise = torch.randn_like(actions) * self.args.exploration_noise
             actions = (actions + noise).clamp(self.envs.single_action_space.low[0], self.envs.single_action_space.high[0])
+        return actions
+    
+    def get_eval_action(self, obs: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            actions = self.actor.get_eval_action(obs)
         return actions
     
     def update_critic(self, data: ReplayBufferSample, global_step: int):
@@ -96,6 +102,7 @@ class TD3Agent(ActorCriticAgent):
     def save_model(self, model_path: str):
         torch.save({
             'actor': self.actor.state_dict(),
+            'actor_target': self.actor_target.state_dict(),
             'qf1': self.qf1_target.state_dict(),
             'qf2': self.qf2_target.state_dict(),
         }, model_path)

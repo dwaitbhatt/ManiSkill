@@ -192,9 +192,9 @@ def launch_pod(yaml_file: str, pod_name: str, command: str, jobs: bool = False) 
     
     try:
         subprocess.run(['kubectl', 'apply', '-f', temp_file_path], check=True)
-        print(f"Successfully launched pod: {pod_name}")
+        print(f"Successfully launched: {pod_name}\n")
     except subprocess.CalledProcessError as e:
-        print(f"Failed to launch pod {pod_name}: {e}")
+        print(f"Failed to launch {pod_name}: {e}\n")
     finally:
         os.unlink(temp_file_path)
 
@@ -250,8 +250,8 @@ def main() -> None:
             extra_cmd_args=config.extra
         )
         
+        print(f"Launching {nautilus_type} {i+1}/{config.num_pods} with seed {seed}...")
         launch_pod(yaml_file, pod_name, command, config.jobs)
-        print(f"Launched {nautilus_type} {i+1}/{config.num_pods} with seed {seed}\n")
 
 if __name__ == "__main__":
     main()

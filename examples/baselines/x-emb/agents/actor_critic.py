@@ -74,7 +74,6 @@ class ActorCriticAgent:
         self.args = args
 
         self.actor = actor_class(envs, args).to(device)
-        self.actor_target = actor_class(envs, args).to(device)
         
         self.qf1 = qf_class(envs, args).to(device)
         self.qf2 = qf_class(envs, args).to(device)
@@ -149,3 +148,12 @@ class ActorCriticAgent:
     
     def load_model(self, model_path: str):
         raise NotImplementedError
+
+    def __repr__(self):
+        repr = ""
+        seen_modules = set()
+        for name, module in self.__dict__.items():
+            if isinstance(module, nn.Module) and id(module) not in seen_modules:
+                repr += f"{name}: {module.__repr__()}\n"
+                seen_modules.add(id(module))
+        return repr
