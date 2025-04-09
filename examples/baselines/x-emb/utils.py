@@ -135,6 +135,12 @@ class Args:
     """the hidden dimension of the encoder networks"""
     enc_lr_scale: float = 1
     """the learning rate scale of the encoder networks"""
+    num_bins: int = 101
+    """the number of bins for the Q/reward predictor"""
+    vmin: float = -10
+    """the minimum value of the Q/reward predictor"""
+    vmax: float = 10
+    """the maximum value of the Q/reward predictor"""
 
     # Transfer learning specific parameters
     latent_robot_obs_dim: int = 128
@@ -174,3 +180,5 @@ class Args:
     """the number of steps each parallel env takes per iteration"""
     latent_obs_dim: int = 0
     """the dimension of the latent observation (including robot and env obs)"""
+    bin_size: float = 0
+    """the size of the bins for the Q/reward predictor"""

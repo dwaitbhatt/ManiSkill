@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import math_utils
 
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
@@ -108,7 +109,7 @@ class SoftLatentObsQNetwork(nn.Module):
         self.net = mlp(
             args.latent_obs_dim + np.prod(envs.single_action_space.shape), 
             [args.mlp_dim] * args.num_layers, 
-            1
+            args.num_bins
         )
 
     def forward(self, x, a):
@@ -136,6 +137,7 @@ class SACTransferAgent(ActorCriticAgent):
             self.robot_obs_dim += len(v[0])
 
         self.env_obs_dim = envs.single_observation_space.shape[0] - self.robot_obs_dim
+        args.bin_size = (args.vmax - args.vmin) / (args.num_bins-1)
 
         if not args.disable_obs_encoders:
             self.latent_obs_dim = args.latent_robot_obs_dim + args.latent_env_obs_dim
@@ -159,7 +161,7 @@ class SACTransferAgent(ActorCriticAgent):
             self.latent_obs_dim = np.prod(envs.single_observation_space.shape)
             self.robot_obs_encoder = nn.Identity()
             self.env_obs_encoder = nn.Identity()
-        setattr(args, 'latent_obs_dim', self.latent_obs_dim)
+        args.latent_obs_dim = self.latent_obs_dim
 
         self.ldyn_rew_act_dim = None
         if not args.disable_act_encoder:
@@ -197,7 +199,7 @@ class SACTransferAgent(ActorCriticAgent):
             self.rew_predictor = mlp(
                 self.latent_obs_dim + self.ldyn_rew_act_dim,
                 [args.mlp_dim] * args.num_layers,
-                1
+                args.num_bins
             ).to(device)
             self.rew_predictor_optimizer = torch.optim.Adam(self.rew_predictor.parameters(), lr=args.lr)
         else:
@@ -283,6 +285,7 @@ class SACTransferAgent(ActorCriticAgent):
         pi = self.decode_action(latent_obs, latent_pi)
         qf1_pi = self.qf1(latent_obs, pi)
         qf2_pi = self.qf2(latent_obs, pi)
+        qf1_pi, qf2_pi = math_utils.two_hot_inv(qf1_pi, self.args), math_utils.two_hot_inv(qf2_pi, self.args)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
         latent_actor_loss = ((self.alpha * latent_log_pi) - min_qf_pi).mean()
 
@@ -317,27 +320,20 @@ class SACTransferAgent(ActorCriticAgent):
             next_actions = self.decode_action(latent_next_obs, latent_next_actions)
             qf1_next_target = self.qf1_target(latent_next_obs, next_actions)
             qf2_next_target = self.qf2_target(latent_next_obs, next_actions)
+            qf1_next_target, qf2_next_target = math_utils.two_hot_inv(qf1_next_target, self.args), math_utils.two_hot_inv(qf2_next_target, self.args)
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * latent_next_log_pi
             next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target).view(-1)
             # data.dones is "stop_bootstrap", which is computed earlier according to args.bootstrap_at_done
 
-        qf1_a_values = self.qf1(latent_obs, data.actions).view(-1)
-        qf2_a_values = self.qf2(latent_obs, data.actions).view(-1)
-        qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-        qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+        qf1_a_values = self.qf1(latent_obs, data.actions)
+        qf2_a_values = self.qf2(latent_obs, data.actions)
+        qf1_loss = math_utils.soft_ce(qf1_a_values, next_q_value[:, None], self.args).mean()
+        qf2_loss = math_utils.soft_ce(qf2_a_values, next_q_value[:, None], self.args).mean()
         qf_loss = qf1_loss + qf2_loss
 
-        # self.obs_encoder_optimizer.zero_grad()
-        # self.act_decoder_optimizer.zero_grad()
-        # self.q_optimizer.zero_grad()
-        # qf_loss.backward()
-        # self.obs_encoder_optimizer.step()
-        # self.act_decoder_optimizer.step()
-        # self.q_optimizer.step()
-
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
-            self.logging_tracker["losses/qf1_values"] = qf1_a_values.mean().item()
-            self.logging_tracker["losses/qf2_values"] = qf2_a_values.mean().item()
+            self.logging_tracker["losses/qf1_values"] = math_utils.two_hot_inv(qf1_a_values, self.args).mean().item()
+            self.logging_tracker["losses/qf2_values"] = math_utils.two_hot_inv(qf2_a_values, self.args).mean().item()
             self.logging_tracker["losses/qf1_loss"] = qf1_loss.item()
             self.logging_tracker["losses/qf2_loss"] = qf2_loss.item()
             self.logging_tracker["losses/qf_loss"] = qf_loss.item() / 2.0
@@ -373,7 +369,7 @@ class SACTransferAgent(ActorCriticAgent):
         latent_action = self.encode_action(data.obs, data.actions)
         
         pred_rew = self.rew_predictor(torch.cat([latent_obs, latent_action], dim=-1))
-        rew_loss = F.mse_loss(pred_rew, data.rewards[:, None])
+        rew_loss = math_utils.soft_ce(pred_rew, data.rewards[:, None], self.args).mean()
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/rew_predictor_loss"] = rew_loss.item()
