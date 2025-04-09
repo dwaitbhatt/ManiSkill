@@ -164,6 +164,20 @@ class Args:
     disable_obs_encoders: bool = False
     """whether to disable the observation encoders"""
 
+    # Alignment specific parameters
+    adapted_target_nets: bool = True
+    """whether to use adapters for target encoder networks"""
+    adapter_layers: int = 1
+    """the number of adapter layers at the start of the target encoder networks"""
+    only_train_adapters: bool = False
+    """whether to only train the adapter layers"""
+    use_latent_adversary: bool = True
+    """whether to use a latent adversary"""
+    lambda_latent_gp: float = 10.0
+    """the lambda for the latent gradient penalty"""
+    lambda_latent_dynamics_loss: float = 10.0
+    """the lambda for the latent dynamics loss"""
+
     training_freq: int = 64
     """training frequency (in steps)"""
     utd: float = 0.5

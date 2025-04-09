@@ -59,6 +59,70 @@ def evaluate(agent: ActorCriticAgent, eval_envs: gym.Env, args: Args, logger: Lo
     return eval_metrics_mean
 
 
+def setup_envs(args: Args, run_name: str):
+    ####### Environment setup #######
+    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
+    if args.control_mode is not None:
+        env_kwargs["control_mode"] = args.control_mode
+    envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
+    eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
+    if isinstance(envs.action_space, gym.spaces.Dict):
+        envs = FlattenActionSpaceWrapper(envs)
+        eval_envs = FlattenActionSpaceWrapper(eval_envs)
+    if args.capture_video or args.save_trajectory:
+        eval_output_dir = f"runs/{run_name}/videos"
+        if args.evaluate:
+            eval_output_dir = f"{os.path.dirname(args.checkpoint)}/test_videos"
+        print(f"Saving eval trajectories/videos to {eval_output_dir}")
+        if args.save_train_video_freq is not None:
+            save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
+            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
+    envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
+    eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
+    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    return envs, eval_envs, env_kwargs
+
+
+def rollout_and_fill_buffer(agent: ActorCriticAgent, envs: gym.Env, rb: ReplayBuffer, global_step: int, starting_obs: torch.Tensor):
+    obs = starting_obs
+    for local_step in range(args.steps_per_env):
+        global_step += 1 * args.num_envs
+
+        # ALGO LOGIC: put action logic here
+        if not learning_has_started:
+            actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
+        else:
+            actions = agent.sample_action(obs)
+            actions = actions.detach()
+
+        # TRY NOT TO MODIFY: execute the game and log data.
+        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        real_next_obs = next_obs.clone()
+        if args.bootstrap_at_done == 'never':
+            need_final_obs = torch.ones_like(terminations, dtype=torch.bool)
+            stop_bootstrap = truncations | terminations # always stop bootstrap when episode ends
+        else:
+            if args.bootstrap_at_done == 'always':
+                need_final_obs = truncations | terminations # always need final obs when episode ends
+                stop_bootstrap = torch.zeros_like(terminations, dtype=torch.bool) # never stop bootstrap
+            else: # bootstrap at truncated
+                need_final_obs = truncations & (~terminations) # only need final obs when truncated and not terminated
+                stop_bootstrap = terminations # only stop bootstrap when terminated, don't stop when truncated
+        if "final_info" in infos:
+            final_info = infos["final_info"]
+            done_mask = infos["_final_info"]
+            real_next_obs[need_final_obs] = infos["final_observation"][need_final_obs]
+            for k, v in final_info["episode"].items():
+                logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step)
+
+        rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap)
+
+        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+        obs = next_obs
+    return global_step, obs
+
+
 if __name__ == "__main__":
     args = tyro.cli(Args)
     args.grad_steps_per_iteration = int(args.training_freq * args.utd)
@@ -94,28 +158,7 @@ if __name__ == "__main__":
     #     device = torch.device("cpu")
     #     print("Using CPU")
 
-    ####### Environment setup #######
-    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
-    if args.control_mode is not None:
-        env_kwargs["control_mode"] = args.control_mode
-    envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
-    eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
-    if isinstance(envs.action_space, gym.spaces.Dict):
-        envs = FlattenActionSpaceWrapper(envs)
-        eval_envs = FlattenActionSpaceWrapper(eval_envs)
-    if args.capture_video or args.save_trajectory:
-        eval_output_dir = f"runs/{run_name}/videos"
-        if args.evaluate:
-            eval_output_dir = f"{os.path.dirname(args.checkpoint)}/test_videos"
-        print(f"Saving eval trajectories/videos to {eval_output_dir}")
-        if args.save_train_video_freq is not None:
-            save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
-            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
-        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
-    envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
-    eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
-
+    envs, eval_envs, env_kwargs = setup_envs(args, run_name)
     max_episode_steps = gym_utils.find_max_episode_steps_value(envs._env)
     logger = None
     if not args.evaluate:
@@ -186,41 +229,9 @@ if __name__ == "__main__":
 
         # Collect samples from environments
         rollout_time = time.perf_counter()
-        for local_step in range(args.steps_per_env):
-            global_step += 1 * args.num_envs
-
-            # ALGO LOGIC: put action logic here
-            if not learning_has_started:
-                actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
-            else:
-                actions = agent.sample_action(obs)
-                actions = actions.detach()
-
-            # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-            real_next_obs = next_obs.clone()
-            if args.bootstrap_at_done == 'never':
-                need_final_obs = torch.ones_like(terminations, dtype=torch.bool)
-                stop_bootstrap = truncations | terminations # always stop bootstrap when episode ends
-            else:
-                if args.bootstrap_at_done == 'always':
-                    need_final_obs = truncations | terminations # always need final obs when episode ends
-                    stop_bootstrap = torch.zeros_like(terminations, dtype=torch.bool) # never stop bootstrap
-                else: # bootstrap at truncated
-                    need_final_obs = truncations & (~terminations) # only need final obs when truncated and not terminated
-                    stop_bootstrap = terminations # only stop bootstrap when terminated, don't stop when truncated
-            if "final_info" in infos:
-                final_info = infos["final_info"]
-                done_mask = infos["_final_info"]
-                real_next_obs[need_final_obs] = infos["final_observation"][need_final_obs]
-                for k, v in final_info["episode"].items():
-                    logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step)
-
-            rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap)
-
-            # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-            obs = next_obs
+        global_step, obs = rollout_and_fill_buffer(agent, envs, rb, global_step, obs)
         rollout_time = time.perf_counter() - rollout_time
+
         cumulative_times["rollout_time"] += rollout_time
         pbar.update(args.num_envs * args.steps_per_env)
 

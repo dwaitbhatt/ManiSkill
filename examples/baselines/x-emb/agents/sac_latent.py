@@ -195,6 +195,7 @@ class SACTransferAgent(ActorCriticAgent):
         else:
             self.latent_forward_dynamics = nn.Identity()
             self.latent_inverse_dynamics = nn.Identity()
+
         if not args.disable_rew_predictor:
             self.rew_predictor = mlp(
                 self.latent_obs_dim + self.ldyn_rew_act_dim,
@@ -229,10 +230,10 @@ class SACTransferAgent(ActorCriticAgent):
         self.actor = self.latent_actor
         self.latent_actor_optimizer = optim.Adam(self.latent_actor.parameters(), lr=args.lr)
 
-        self.all_modules = [self.latent_actor, self.qf1, self.qf2, self.log_alpha,
-                            self.robot_obs_encoder, self.env_obs_encoder, 
-                            self.act_encoder, self.act_decoder, 
-                            self.latent_forward_dynamics, self.latent_inverse_dynamics, self.rew_predictor]
+        self.personal_modules = [self.robot_obs_encoder, self.act_encoder, self.act_decoder]
+        self.shared_modules = [self.latent_actor, self.qf1, self.qf2, self.log_alpha, self.env_obs_encoder, 
+                               self.latent_forward_dynamics, self.latent_inverse_dynamics, self.rew_predictor]
+        self.all_modules = self.personal_modules + self.shared_modules
 
     def initialize_networks(self):
         super().initialize_networks()
