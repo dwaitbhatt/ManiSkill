@@ -32,11 +32,13 @@ class LatentGaussianActor(NormalizedActor):
         self.latent_act = latent_act
         if self.latent_obs:
             input_dim = args.latent_obs_dim
+            self.latent_obs_dim = args.latent_obs_dim
         else:
             input_dim = np.prod(envs.single_observation_space.shape)
 
         if self.latent_act:
             output_dim = args.latent_action_dim
+            self.latent_action_dim = args.latent_action_dim
         else:
             output_dim = np.prod(envs.single_action_space.shape)
             
@@ -174,15 +176,23 @@ class SACTransferAgent(ActorCriticAgent):
             self.ldyn_rew_act_dim = np.prod(envs.single_action_space.shape)
 
         if not args.disable_latent_dynamics:
-            self.latent_dynamics = mlp(
+            self.latent_forward_dynamics = mlp(
                 self.latent_obs_dim + self.ldyn_rew_act_dim,
                 [args.mlp_dim] * args.num_layers,
                 self.latent_obs_dim,
                 final_act=SimNorm(args) if not args.disable_obs_encoders else None
             ).to(device)
-            self.latent_dynamics_optimizer = torch.optim.Adam(self.latent_dynamics.parameters(), lr=args.lr)
+            self.latent_inverse_dynamics = mlp(
+                2 * self.latent_obs_dim,
+                [args.mlp_dim] * args.num_layers,
+                self.ldyn_rew_act_dim,
+                final_act=SimNorm(args) if not args.disable_act_encoder else None
+            ).to(device)
+            self.latent_dynamics_optimizer = torch.optim.Adam([{"params": self.latent_forward_dynamics.parameters(), "lr": args.lr},
+                                                              {"params": self.latent_inverse_dynamics.parameters(), "lr": args.lr}])
         else:
-            self.latent_dynamics = nn.Identity()
+            self.latent_forward_dynamics = nn.Identity()
+            self.latent_inverse_dynamics = nn.Identity()
         if not args.disable_rew_predictor:
             self.rew_predictor = mlp(
                 self.latent_obs_dim + self.ldyn_rew_act_dim,
@@ -217,10 +227,15 @@ class SACTransferAgent(ActorCriticAgent):
         self.actor = self.latent_actor
         self.latent_actor_optimizer = optim.Adam(self.latent_actor.parameters(), lr=args.lr)
 
+        self.all_modules = [self.latent_actor, self.qf1, self.qf2, self.log_alpha,
+                            self.robot_obs_encoder, self.env_obs_encoder, 
+                            self.act_encoder, self.act_decoder, 
+                            self.latent_forward_dynamics, self.latent_inverse_dynamics, self.rew_predictor]
 
     def initialize_networks(self):
         super().initialize_networks()
-        self.latent_dynamics.apply(weight_init)
+        self.latent_forward_dynamics.apply(weight_init)
+        self.latent_inverse_dynamics.apply(weight_init)
         self.rew_predictor.apply(weight_init)
         self.robot_obs_encoder.apply(weight_init)
         self.env_obs_encoder.apply(weight_init)
@@ -228,16 +243,22 @@ class SACTransferAgent(ActorCriticAgent):
         self.act_decoder.apply(weight_init)
 
     def encode_obs(self, obs: torch.Tensor) -> torch.Tensor:
-        robot_obs = obs[:, :self.robot_obs_dim]
-        env_obs = obs[:, self.robot_obs_dim:]
-        latent_robot_obs = self.robot_obs_encoder(robot_obs)
-        latent_env_obs = self.env_obs_encoder(env_obs)
-        return torch.cat([latent_robot_obs, latent_env_obs], dim=-1)
+        if self.args.disable_obs_encoders:
+            latent_obs = obs
+        else:
+            robot_obs = obs[:, :self.robot_obs_dim]
+            env_obs = obs[:, self.robot_obs_dim:]
+            latent_robot_obs = self.robot_obs_encoder(robot_obs)
+            latent_env_obs = self.env_obs_encoder(env_obs)
+            latent_obs = torch.cat([latent_robot_obs, latent_env_obs], dim=-1)
+        return latent_obs
     
     def encode_action(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        if not self.args.disable_act_encoder:
-            action = self.act_encoder(torch.cat([obs, action], dim=-1))
-        return action
+        if self.args.disable_act_encoder:
+            latent_action = action
+        else:
+            latent_action = self.act_encoder(torch.cat([obs, action], dim=-1))
+        return latent_action
     
     def decode_action(self, latent_obs: torch.Tensor, latent_action: torch.Tensor) -> torch.Tensor:
         if self.args.disable_act_decoder:
@@ -328,19 +349,22 @@ class SACTransferAgent(ActorCriticAgent):
         latent_next_obs = self.encode_obs(data.next_obs)
         latent_action = self.encode_action(data.obs, data.actions)
         
-        pred_latent_next_obs = self.latent_dynamics(torch.cat([latent_obs, latent_action], dim=-1))
-        latent_dynamics_loss = F.mse_loss(pred_latent_next_obs, latent_next_obs)
-
-        # self.obs_encoder_optimizer.zero_grad()
-        # self.act_encoder_optimizer.zero_grad()
-        # self.latent_dynamics_optimizer.zero_grad()
-        # latent_dynamics_loss.backward()
-        # self.obs_encoder_optimizer.step()
-        # self.act_encoder_optimizer.step()
-        # self.latent_dynamics_optimizer.step()
+        pred_latent_next_obs = self.latent_forward_dynamics(torch.cat([latent_obs, latent_action], dim=-1))
+        latent_forward_dynamics_loss = F.mse_loss(pred_latent_next_obs, latent_next_obs)
+        
+        pred_latent_action = self.latent_inverse_dynamics(torch.cat([latent_obs, latent_next_obs], dim=-1))
+        if self.args.disable_act_encoder:
+            normalized_latent_action = (latent_action - self.latent_actor.action_bias) / self.latent_actor.action_scale
+        else:
+            normalized_latent_action = latent_action
+        latent_inverse_dynamics_loss = F.mse_loss(pred_latent_action, normalized_latent_action)
+        
+        latent_dynamics_loss = latent_forward_dynamics_loss + latent_inverse_dynamics_loss
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/latent_dynamics_loss"] = latent_dynamics_loss.item()
+            self.logging_tracker["losses/latent_forward_dynamics_loss"] = latent_forward_dynamics_loss.item()
+            self.logging_tracker["losses/latent_inverse_dynamics_loss"] = latent_inverse_dynamics_loss.item()
 
         return latent_dynamics_loss
 
@@ -350,14 +374,6 @@ class SACTransferAgent(ActorCriticAgent):
         
         pred_rew = self.rew_predictor(torch.cat([latent_obs, latent_action], dim=-1))
         rew_loss = F.mse_loss(pred_rew, data.rewards[:, None])
-
-        # self.obs_encoder_optimizer.zero_grad()
-        # self.act_encoder_optimizer.zero_grad()
-        # self.rew_predictor_optimizer.zero_grad()
-        # rew_loss.backward()
-        # self.obs_encoder_optimizer.step()
-        # self.act_encoder_optimizer.step()
-        # self.rew_predictor_optimizer.step()
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/rew_predictor_loss"] = rew_loss.item()
@@ -381,7 +397,6 @@ class SACTransferAgent(ActorCriticAgent):
         for local_update in range(self.args.grad_steps_per_iteration):
             global_update += 1
             data = rb.sample(self.args.batch_size)
-
 
             critic_loss = self.get_critic_loss(data, global_step)
             
@@ -434,7 +449,8 @@ class SACTransferAgent(ActorCriticAgent):
             'env_obs_encoder': self.env_obs_encoder.state_dict(),
             'act_encoder': self.act_encoder.state_dict(),
             'act_decoder': self.act_decoder.state_dict(),
-            'latent_dynamics': self.latent_dynamics.state_dict(),
+            'latent_forward_dynamics': self.latent_forward_dynamics.state_dict(),
+            'latent_inverse_dynamics': self.latent_inverse_dynamics.state_dict(),
             'rew_predictor': self.rew_predictor.state_dict(),
         }, model_path)
         print(f"model saved to {model_path}")
@@ -448,6 +464,13 @@ class SACTransferAgent(ActorCriticAgent):
         self.robot_obs_encoder.load_state_dict(checkpoint['robot_obs_encoder'])
         self.env_obs_encoder.load_state_dict(checkpoint['env_obs_encoder'])
         self.act_encoder.load_state_dict(checkpoint['act_encoder'])
-        self.latent_dynamics.load_state_dict(checkpoint['latent_dynamics'])
+        self.act_decoder.load_state_dict(checkpoint['act_decoder'])
+        self.latent_forward_dynamics.load_state_dict(checkpoint['latent_forward_dynamics'])
+        self.latent_inverse_dynamics.load_state_dict(checkpoint['latent_inverse_dynamics'])
         self.rew_predictor.load_state_dict(checkpoint['rew_predictor'])
         print(f"model loaded from {model_path}")
+
+    def freeze_parameters(self):
+        for module in self.all_modules:
+            for param in module.parameters():
+                param.requires_grad = False

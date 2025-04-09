@@ -137,11 +137,11 @@ class Args:
     """the learning rate scale of the encoder networks"""
 
     # Transfer learning specific parameters
-    latent_robot_obs_dim: int = 256
+    latent_robot_obs_dim: int = 128
     """the dimension of the latent observation"""
     latent_env_obs_dim: int = 128
     """the dimension of the latent observation"""
-    latent_action_dim: int = 256
+    latent_action_dim: int = 128
     """the dimension of the latent action"""
     latent_dynamics_freq: int = 1000
     """the frequency of updating the latent dynamics"""
