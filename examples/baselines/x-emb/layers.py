@@ -83,6 +83,48 @@ def mlp(in_dim, mlp_dims, out_dim, final_act=None, dropout=0.):
     mlp.append(NormedLinear(dims[-2], dims[-1], act=final_act) if final_act else nn.Linear(dims[-2], dims[-1]))
     return nn.Sequential(*mlp)
 
+def disc_mlp(in_dim, mlp_dims, out_dim, final_act="identity", dropout=0.3):
+    """
+    MLP with LayerNorm, LeakyReLU, and dropout in hidden layers output.
+    Use final activation "identity" for WGAN, and "sigmoid" for GAN.
+    """
+    if isinstance(mlp_dims, int):
+        mlp_dims = [mlp_dims]
+    dims = [in_dim] + mlp_dims + [out_dim]
+
+    hidden_act = nn.LeakyReLU(0.2, inplace=True)
+    mlp = nn.ModuleList()
+    # Linear first layer
+    mlp.append(nn.Linear(dims[0], dims[1]))
+    mlp.append(hidden_act)
+    # LayerNorm, LeakyReLU, dropout in hidden layers
+    for i in range(1, len(dims) - 2):
+        mlp.append(NormedLinear(dims[i], dims[i+1], dropout=dropout, act=hidden_act))
+    # Sigmoid output
+    mlp.append(nn.Linear(dims[-2], dims[-1]))
+    if final_act == "sigmoid":
+        mlp.append(nn.Sigmoid())
+    elif final_act == "identity":
+        pass
+    else:
+        raise ValueError(f"Invalid final_act: {final_act}")
+    return nn.Sequential(*mlp)
+
+def copy_partial_mlp_weights(source_mlp: nn.Sequential, target_mlp: nn.Sequential, start_idx: int, end_idx: int):
+    """Copy the weights of a source mlp model to a target mlp model. Keep the same architecture, but copy weights 
+    only for the layers between start_idx and end_idx (both inclusive)."""
+    if end_idx < 0:
+        end_idx += len(source_mlp)
+    # Copy state dict for all layers between start_idx and end_idx (both inclusive)
+    for i in range(start_idx, end_idx+1):
+        target_mlp[i].load_state_dict(source_mlp[i].state_dict())
+
+def freeze_mlp_layers(mlp: nn.Sequential, start_idx: int, end_idx: int):
+    """Freeze the weights of mlp layers between start_idx and end_idx (both inclusive)."""
+    if end_idx < 0:
+        end_idx += len(mlp)
+    for i in range(start_idx, end_idx+1):
+        mlp[i].requires_grad_(False)
 
 # Initialization
 def weight_init(m):

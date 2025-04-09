@@ -59,6 +59,31 @@ def evaluate(agent: ActorCriticAgent, eval_envs: gym.Env, args: Args, logger: Lo
     return eval_metrics_mean
 
 
+def setup_envs(args: Args, run_name: str):
+    ####### Environment setup #######
+    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
+    if args.control_mode is not None:
+        env_kwargs["control_mode"] = args.control_mode
+    envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
+    eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
+    if isinstance(envs.action_space, gym.spaces.Dict):
+        envs = FlattenActionSpaceWrapper(envs)
+        eval_envs = FlattenActionSpaceWrapper(eval_envs)
+    if args.capture_video or args.save_trajectory:
+        eval_output_dir = f"runs/{run_name}/videos"
+        if args.evaluate:
+            eval_output_dir = f"{os.path.dirname(args.checkpoint)}/test_videos"
+        print(f"Saving eval trajectories/videos to {eval_output_dir}")
+        if args.save_train_video_freq is not None:
+            save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
+            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
+    envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
+    eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
+    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
+    return envs, eval_envs, env_kwargs
+
+
 if __name__ == "__main__":
     args = tyro.cli(Args)
     args.grad_steps_per_iteration = int(args.training_freq * args.utd)
@@ -94,28 +119,7 @@ if __name__ == "__main__":
     #     device = torch.device("cpu")
     #     print("Using CPU")
 
-    ####### Environment setup #######
-    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
-    if args.control_mode is not None:
-        env_kwargs["control_mode"] = args.control_mode
-    envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
-    eval_envs = gym.make(args.env_id, num_envs=args.num_eval_envs, reconfiguration_freq=args.eval_reconfiguration_freq, human_render_camera_configs=dict(shader_pack="default"), **env_kwargs)
-    if isinstance(envs.action_space, gym.spaces.Dict):
-        envs = FlattenActionSpaceWrapper(envs)
-        eval_envs = FlattenActionSpaceWrapper(eval_envs)
-    if args.capture_video or args.save_trajectory:
-        eval_output_dir = f"runs/{run_name}/videos"
-        if args.evaluate:
-            eval_output_dir = f"{os.path.dirname(args.checkpoint)}/test_videos"
-        print(f"Saving eval trajectories/videos to {eval_output_dir}")
-        if args.save_train_video_freq is not None:
-            save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
-            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
-        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30, wandb_video_freq=args.wandb_video_freq)
-    envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
-    eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
-    assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
-
+    envs, eval_envs, env_kwargs = setup_envs(args, run_name)
     max_episode_steps = gym_utils.find_max_episode_steps_value(envs._env)
     logger = None
     if not args.evaluate:
