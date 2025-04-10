@@ -68,14 +68,23 @@ class PlaceCubeEnv(BaseEnv):
 
     @property
     def _default_sensor_configs(self):
-        pose = sapien_utils.look_at(eye=[0.3, 0, 0.2], target=[-0.1, 0, 0])
+        real_pose = sapien_utils.look_at(eye=[0.508, -0.5, 0.42], target=[-0.522, 0.2, 0])
         return [
+            # CameraConfig(
+            #     "base_camera",
+            #     pose=pose,
+            #     width=128,
+            #     height=128,
+            #     fov=np.pi / 2,
+            #     near=0.01,
+            #     far=100,
+            # ),
             CameraConfig(
-                "base_camera",
-                pose=pose,
-                width=128,
-                height=128,
-                fov=np.pi / 2,
+                "real_camera",
+                pose=real_pose,
+                width=640,
+                height=480,
+                fov=np.pi * 0.4,
                 near=0.01,
                 far=100,
             )
@@ -134,7 +143,7 @@ class PlaceCubeEnv(BaseEnv):
         self.obj = actors.build_cube(
             self.scene,
             half_size=self.cube_half_length,
-            color=np.array([12, 42, 160, 255]) / 255,
+            color=np.array([190, 30, 60, 255]) / 255,
             name="cube",
             body_type="dynamic",
             initial_pose=sapien.Pose(p=[0, 0, self.cube_half_length + 2*self.short_side_half_size]),
