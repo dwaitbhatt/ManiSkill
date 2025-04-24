@@ -16,7 +16,10 @@ from mani_skill.utils.structs import Pose
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.link import Link
 
-
+REACHY_ARM_COLLISION_BIT = 28
+"""Collision bit of the reachy hand links"""
+REACHY_TORSO_COLLISION_BIT = 29
+"""Collision bit of the reachy torso"""
 REACHY_WHEELS_COLLISION_BIT = 30
 """Collision bit of the reachy robot wheel links"""
 REACHY_BASE_COLLISION_BIT = 31
@@ -44,7 +47,7 @@ class Reachy2(BaseAgent):
     keyframes = dict(
         rest=Keyframe(
             pose=sapien.Pose(),
-            qpos=np.zeros(34),
+            qpos=np.zeros(37),
         )
     )
 
@@ -82,7 +85,7 @@ class Reachy2(BaseAgent):
                 entity_uid=self.tof_camera_link_name,
             ),
         ]
-    disable_self_collisions = True
+    disable_self_collisions = False
 
     def __init__(self, *args, **kwargs):
         self.r_arm_joint_names = [
@@ -106,16 +109,20 @@ class Reachy2(BaseAgent):
         ]
         self.all_arm_joint_names = self.r_arm_joint_names + self.l_arm_joint_names
 
-        # self.r_hand_joint_name = "r_hand_finger"
-        self.r_hand_joint_names = ["r_hand_finger_proximal", "r_hand_finger_distal"]
+        self.r_hand_joint_names = ["r_hand_finger"]
+        # self.r_hand_joint_names = ["r_hand_finger_proximal", "r_hand_finger_distal"]
         self.r_hand_mimic_joint_names = [
+            "r_hand_finger_proximal",
+            "r_hand_finger_distal",
             "r_hand_finger_proximal_mimic",
             "r_hand_finger_distal_mimic"
         ]
 
-        # self.l_hand_joint_name = "l_hand_finger"
-        self.l_hand_joint_names = ["l_hand_finger_proximal", "l_hand_finger_distal"]
+        self.l_hand_joint_names = ["l_hand_finger"]
+        # self.l_hand_joint_names = ["l_hand_finger_proximal", "l_hand_finger_distal"]
         self.l_hand_mimic_joint_names = [
+            "l_hand_finger_proximal",
+            "l_hand_finger_distal",
             "l_hand_finger_proximal_mimic",
             "l_hand_finger_distal_mimic"
         ]
@@ -131,7 +138,7 @@ class Reachy2(BaseAgent):
             "antenna_right"
         ]
 
-        self.tripod_joint_name = "tripod_joint"
+        self.tripod_joint_names = ["tripod_joint"]
         self.tripod_mimic_joint_names = [
             "left_bar_joint_mimic",
             "left_bar_prism_joint_mimic",
@@ -140,9 +147,9 @@ class Reachy2(BaseAgent):
         ]
 
         self.base_joint_names = [
-            "drivewhl1_joint",
-            "drivewhl2_joint",
-            "drivewhl3_joint",
+            "root_x_axis_joint",
+            "root_y_axis_joint",
+            "root_z_rotation_joint",
         ]
 
         self.l_ee_link_name = "l_arm_tip"
@@ -313,8 +320,8 @@ class Reachy2(BaseAgent):
 
         gripper_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
             self.all_hand_active_joint_names,
-            lower=-0.51,
-            upper=0.554,
+            lower=0.3,
+            upper=0.75,
             stiffness=self.gripper_stiffness,
             damping=self.gripper_damping,
             force_limit=self.gripper_force_limit,
@@ -368,7 +375,7 @@ class Reachy2(BaseAgent):
         )
 
         tripod_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
-            [self.tripod_joint_name],
+            self.tripod_joint_names,
             lower=0,
             upper=0.21,
             stiffness=self.tripod_stiffness,
@@ -378,7 +385,7 @@ class Reachy2(BaseAgent):
         )
 
         tripod_mimic_joint_delta_pos = PDJointPosMimicControllerConfig(
-            [self.tripod_joint_name],
+            self.tripod_joint_names,
             lower=-0.1,
             upper=0.1,
             stiffness=self.tripod_stiffness,
@@ -389,7 +396,7 @@ class Reachy2(BaseAgent):
         )
 
         stiff_tripod_pd_joint_pos = PDJointPosControllerConfig(
-            [self.tripod_joint_name],
+            self.tripod_joint_names,
             None,
             None,
             1e5,
@@ -416,7 +423,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_joint_delta_pos,
                 tripod_passive=tripod_passive_joints_controller,
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel
             ),
             pd_joint_pos=dict(
                 arms=arms_pd_joint_pos,
@@ -425,7 +432,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel
             ),
             pd_ee_delta_pos=dict(
                 l_arm=l_arm_pd_ee_delta_pos,
@@ -435,8 +442,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_ee_delta_pose=dict(
                 l_arm=l_arm_pd_ee_delta_pose,
@@ -446,8 +452,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_ee_delta_pose_align=dict(
                 l_arm=l_arm_pd_ee_delta_pose_align,
@@ -457,8 +462,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             # TODO(jigu): how to add boundaries for the following controllers
             pd_joint_target_delta_pos=dict(
@@ -468,8 +472,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_ee_target_delta_pos=dict(
                 l_arm=l_arm_pd_ee_target_delta_pos,
@@ -479,8 +482,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_ee_target_delta_pose=dict(
                 l_arm=l_arm_pd_ee_target_delta_pose,
@@ -490,8 +492,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             # Caution to use the following controllers
             pd_joint_vel=dict(
@@ -501,8 +502,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_joint_pos_vel=dict(
                 arms=arms_pd_joint_pos_vel,
@@ -511,8 +511,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_joint_delta_pos_vel=dict(
                 arms=arms_pd_joint_delta_pos_vel,
@@ -521,8 +520,7 @@ class Reachy2(BaseAgent):
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_joint_delta_pos,
                 tripod_passive=tripod_passive_joints_controller,
-
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel,
             ),
             pd_joint_delta_pos_stiff_body=dict(
                 arms=arms_pd_joint_delta_pos,
@@ -531,7 +529,7 @@ class Reachy2(BaseAgent):
                 head=stiff_head_pd_joint_pos,
                 tripod_active=stiff_tripod_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
-                # base=base_pd_joint_vel,
+                base=base_pd_joint_vel
             ),
         )
 
@@ -539,30 +537,134 @@ class Reachy2(BaseAgent):
         return deepcopy_dict(controller_configs)
 
     def _after_init(self):
-        self.l_finger_link: Link = sapien_utils.get_obj_by_name(
-            self.robot.get_links(), "l_gripper_finger"
+        # TCPs
+        self.l_tcp_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), self.l_ee_link_name
         )
-        self.l_thumb_link: Link = sapien_utils.get_obj_by_name(
-            self.robot.get_links(), "l_gripper_thumb"
+        self.r_tcp_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), self.r_ee_link_name
         )
-        self.l_tcp: Link = sapien_utils.get_obj_by_name(
-            self.robot.get_links(), "l_arm_tip"
-        )
+        self.tcp = self.r_tcp_link
 
-        self.r_finger_link: Link = sapien_utils.get_obj_by_name(
-            self.robot.get_links(), "r_gripper_finger"
-        )
-        self.r_thumb_link: Link = sapien_utils.get_obj_by_name(
-            self.robot.get_links(), "r_gripper_thumb"
-        )
-        self.r_tcp: Link = sapien_utils.get_obj_by_name(
-            self.robot.get_links(), "r_arm_tip"
-        )
-        self.tcp = self.r_tcp
-
+        # Base
         self.base_link: Link = sapien_utils.get_obj_by_name(
             self.robot.get_links(), "base_link"
         )
+        self.base_link.set_collision_group_bit(
+            group=2, bit_idx=REACHY_BASE_COLLISION_BIT, bit=1
+        )
+
+        # Bars
+        # Kinematic chains are: 
+        #     base_link -> back_bar_base -> back_bar_inner -> torso
+        #     torso -> left_bar_inner -> left_bar_base
+        #     torso -> right_bar_inner -> right_bar_base
+        #     base_link -> left_bar_anchor
+        #     base_link -> right_bar_anchor
+        self.back_bar_base_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "back_bar_base"
+        )
+        self.back_bar_inner_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "back_bar_inner"
+        )
+
+        self.left_bar_base_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "left_bar_base"
+        )
+        self.left_bar_inner_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "left_bar_inner"
+        )
+        self.left_bar_anchor_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "left_bar_anchor"
+        )
+
+        self.right_bar_base_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "right_bar_base"
+        )
+        self.right_bar_inner_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "right_bar_inner"
+        )
+        self.right_bar_anchor_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "right_bar_anchor"
+        )
+        for link in [self.left_bar_base_link, self.right_bar_base_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_BASE_COLLISION_BIT, bit=1
+            )
+
+        # Torso and arms
+        # Kinematic chains are: 
+        #     torso -> ... -> l_elbow_arm_link -> ... -> l_elbow_forearm_link -> ... -> l_hand_palm_link
+        #     torso -> ... -> r_elbow_arm_link -> ... -> r_elbow_forearm_link -> ... -> r_hand_palm_link
+        self.torso_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "torso"
+        )
+        self.l_elbow_arm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_elbow_arm_link"
+        )
+        self.l_elbow_forearm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_elbow_forearm_link"
+        )
+        self.r_elbow_arm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_elbow_arm_link"
+        )
+        self.r_elbow_forearm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_elbow_forearm_link"
+        )
+        for link in [self.torso_link, self.l_elbow_arm_link, self.r_elbow_arm_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_TORSO_COLLISION_BIT, bit=1
+            )
+        for link in [self.l_elbow_forearm_link, self.l_elbow_arm_link,
+                     self.r_elbow_forearm_link, self.r_elbow_arm_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_ARM_COLLISION_BIT, bit=1
+            )
+
+        # Hands
+        # Kinematic chains are: 
+        #     l_hand_palm_link -> l_hand_proximal_link -> l_hand_distal_link
+        #     l_hand_palm_link -> l_hand_proximal_mimic_link -> l_hand_distal_mimic_link
+        #     r_hand_palm_link -> r_hand_proximal_link -> r_hand_distal_link
+        #     r_hand_palm_link -> r_hand_proximal_mimic_link -> r_hand_distal_mimic_link
+        self.l_hand_palm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_hand_palm_link"
+        )
+        self.l_hand_proximal_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_hand_proximal_link"
+        )
+        self.l_hand_proximal_mimic_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_hand_proximal_mimic_link"
+        )
+        self.l_hand_distal_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_hand_distal_link"
+        )
+        self.l_hand_distal_mimic_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_hand_distal_mimic_link"
+        )
+
+        self.r_hand_palm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_hand_palm_link"
+        )
+        self.r_hand_proximal_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_hand_proximal_link"
+        )
+        self.r_hand_proximal_mimic_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_hand_proximal_mimic_link"
+        )
+        self.r_hand_distal_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_hand_distal_link"
+        )
+        self.r_hand_distal_mimic_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_hand_distal_mimic_link"
+        )
+        for link in [self.l_elbow_forearm_link, self.l_hand_palm_link,
+                     self.r_elbow_forearm_link, self.r_hand_palm_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_ARM_COLLISION_BIT, bit=1
+            )
+
+        # Wheels
         self.wheel1_link: Link = self.robot.links_map["drivewhl1_link"]
         self.wheel2_link: Link = self.robot.links_map["drivewhl2_link"]
         self.wheel3_link: Link = self.robot.links_map["drivewhl3_link"]
@@ -570,9 +672,6 @@ class Reachy2(BaseAgent):
             link.set_collision_group_bit(
                 group=2, bit_idx=REACHY_WHEELS_COLLISION_BIT, bit=1
             )
-        self.base_link.set_collision_group_bit(
-            group=2, bit_idx=REACHY_BASE_COLLISION_BIT, bit=1
-        )
 
         self.left_camera_link: Link = sapien_utils.get_obj_by_name(
             self.robot.get_links(), self.l_camera_link_name
@@ -598,17 +697,17 @@ class Reachy2(BaseAgent):
         """
         # Check if the left hand is grasping
         l_finger_contact_forces = self.scene.get_pairwise_contact_forces(
-            self.l_finger_link, object
+            self.l_hand_distal_link, object
         )
         l_thumb_contact_forces = self.scene.get_pairwise_contact_forces(
-            self.l_thumb_link, object
+            self.l_hand_distal_mimic_link, object
         )
         l_finger_force = torch.linalg.norm(l_finger_contact_forces, axis=1)
         l_thumb_force = torch.linalg.norm(l_thumb_contact_forces, axis=1)
 
         # direction to open the gripper
-        lfdirection = -self.l_finger_link.pose.to_transformation_matrix()[..., :3, 1]
-        ltdirection = self.l_thumb_link.pose.to_transformation_matrix()[..., :3, 1]
+        lfdirection = -self.l_hand_distal_link.pose.to_transformation_matrix()[..., :3, 1]
+        ltdirection = self.l_hand_distal_mimic_link.pose.to_transformation_matrix()[..., :3, 1]
         lfangle = common.compute_angle_between(lfdirection, l_finger_contact_forces)
         ltangle = common.compute_angle_between(ltdirection, l_thumb_contact_forces)
         lf_flag = torch.logical_and(
@@ -622,16 +721,16 @@ class Reachy2(BaseAgent):
 
         # Check if the right hand is grasping
         r_finger_contact_forces = self.scene.get_pairwise_contact_forces(
-            self.r_finger_link, object
+            self.r_hand_distal_link, object
         )
         r_thumb_contact_forces = self.scene.get_pairwise_contact_forces(
-            self.r_thumb_link, object
+            self.r_hand_distal_mimic_link, object
         )
         r_finger_force = torch.linalg.norm(r_finger_contact_forces, axis=1)
         r_thumb_force = torch.linalg.norm(r_thumb_contact_forces, axis=1)
 
-        rfdirection = -self.r_finger_link.pose.to_transformation_matrix()[..., :3, 1]
-        rtdirection = self.r_thumb_link.pose.to_transformation_matrix()[..., :3, 1]
+        rfdirection = -self.r_hand_distal_link.pose.to_transformation_matrix()[..., :3, 1]
+        rtdirection = self.r_hand_distal_mimic_link.pose.to_transformation_matrix()[..., :3, 1]
         rfangle = common.compute_angle_between(rfdirection, r_finger_contact_forces)
         rtangle = common.compute_angle_between(rtdirection, r_thumb_contact_forces)
         rf_flag = torch.logical_and(
@@ -667,26 +766,3 @@ class Reachy2(BaseAgent):
     @property
     def tcp_pose(self) -> Tuple[Pose, Pose]:
         return (self.l_tcp.pose, self.r_tcp.pose)
-
-    def _after_loading_articulation(self):
-        gripper_links = [
-            "r_wrist_out_link",
-            "r_hand_palm_link",
-            "r_hand_virtual_gripper_link",
-            "r_hand_proximal_link",
-            "r_hand_proximal_mimic_link",
-            "l_wrist_out_link",
-            "l_hand_palm_link",
-            "l_hand_virtual_gripper_link",
-            "l_hand_proximal_link",
-            "l_hand_proximal_mimic_link",
-        ]
-        other_links_disable_self_collisions = ["base_link"]
-        for link_name in gripper_links + other_links_disable_self_collisions:
-            link = self.robot.links_map[link_name]
-            link.set_collision_group_bit(group=2, bit_idx=0, bit=1)
-
-        enable_self_collisions = ["l_hand_distal_link", "l_hand_distal_mimic_link", "r_hand_distal_link", "r_hand_distal_mimic_link"]
-        for link_name in enable_self_collisions:
-            link = self.robot.links_map[link_name]
-            link.set_collision_group_bit(group=2, bit_idx=0, bit=0)
