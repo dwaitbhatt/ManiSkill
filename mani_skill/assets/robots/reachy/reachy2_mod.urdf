@@ -456,10 +456,38 @@
         <color rgba="0.8 0.8 0.8 1"/>
       </material>
     </visual>
-    <collision>
+    <!-- <collision>
       <origin rpy="0 0 0" xyz="0 0 -0.2425"/>
       <geometry>
         <box size="0.05 0.05 0.485"/>
+      </geometry>
+    </collision> -->
+    <!-- Left Wall -->
+    <collision>
+      <origin xyz="-0.02 0 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.01 0.05 0.485"/>
+      </geometry>
+    </collision>
+    <!-- Right Wall -->
+    <collision>
+      <origin xyz="0.02 0 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.01 0.05 0.485"/>
+      </geometry>
+    </collision>
+    <!-- Front Wall -->
+    <collision>
+      <origin xyz="0 -0.02 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.01 0.485"/>
+      </geometry>
+    </collision>
+    <!-- Back Wall -->
+    <collision>
+      <origin xyz="0 0.02 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.01 0.485"/>
       </geometry>
     </collision>
     <inertial>
@@ -470,18 +498,18 @@
   </link>
   <link name="left_bar_anchor">
     <visual>
-      <origin rpy="0 0 0.19088666029061982" xyz="0 0 0.015"/>
+      <origin rpy="0 0 0.19088666029061982" xyz="0 0 0.0052"/>
       <geometry>
-        <box size="0.03 0.03 0.03"/>
+        <box size="0.03 0.03 0.005"/>
       </geometry>
       <material name="reachy_grey">
         <color rgba="0.8 0.8 0.8 1"/>
       </material>
     </visual>
     <collision>
-      <origin rpy="0 0 0.19088666029061982" xyz="0 0 0.015"/>
+      <origin rpy="0 0 0.19088666029061982" xyz="0 0 0.0052"/>
       <geometry>
-        <box size="0.03 0.03 0.03"/>
+        <box size="0.03 0.03 0.005"/>
       </geometry>
     </collision>
     <inertial>
@@ -548,10 +576,38 @@
         <color rgba="0.8 0.8 0.8 1"/>
       </material>
     </visual>
-    <collision>
+    <!-- <collision>
       <origin rpy="0 0 0" xyz="0 0 -0.2425"/>
       <geometry>
         <box size="0.05 0.05 0.485"/>
+      </geometry>
+    </collision> -->
+    <!-- Left Wall -->
+    <collision>
+      <origin xyz="-0.02 0 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.01 0.05 0.485"/>
+      </geometry>
+    </collision>
+    <!-- Right Wall -->
+    <collision>
+      <origin xyz="0.02 0 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.01 0.05 0.485"/>
+      </geometry>
+    </collision>
+    <!-- Front Wall -->
+    <collision>
+      <origin xyz="0 -0.02 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.01 0.485"/>
+      </geometry>
+    </collision>
+    <!-- Back Wall -->
+    <collision>
+      <origin xyz="0 0.02 -0.2425" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.01 0.485"/>
       </geometry>
     </collision>
     <inertial>
@@ -562,18 +618,18 @@
   </link>
   <link name="right_bar_anchor">
     <visual>
-      <origin rpy="0 0 -0.19088666029061982" xyz="0 0 0.015"/>
+      <origin rpy="0 0 -0.19088666029061982" xyz="0 0 0.0025"/>
       <geometry>
-        <box size="0.03 0.03 0.03"/>
+        <box size="0.03 0.03 0.005"/>
       </geometry>
       <material name="reachy_grey">
         <color rgba="0.8 0.8 0.8 1"/>
       </material>
     </visual>
     <collision>
-      <origin rpy="0 0 -0.19088666029061982" xyz="0 0 0.015"/>
+      <origin rpy="0 0 -0.19088666029061982" xyz="0 0 0.0025"/>
       <geometry>
-        <box size="0.03 0.03 0.03"/>
+        <box size="0.03 0.03 0.005"/>
       </geometry>
     </collision>
     <inertial>

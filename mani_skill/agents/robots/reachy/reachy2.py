@@ -47,15 +47,57 @@ class Reachy2(BaseAgent):
     keyframes = dict(
         rest=Keyframe(
             pose=sapien.Pose(),
-            qpos=np.zeros(37),
+            qpos=([
+                0, 0, 0,                         # Base (3 - x, y, theta)
+                0,                               # Tripod (1)
+                -0.191, -0.191, 0.234, 0.234,    # Tripod bars (4 - dummies)
+                0, 0, 0,                         # Neck (3 - roll, pitch, yaw)
+                0, 0, 0, 0,                      # Shoulders (4 - r_pitch, l_pitch, r_roll, l_roll)
+                0, 0,                            # Antennas (2 - left, right)
+                0, 0, 0, 0,                      # Elbows (4 - r_yaw, l_yaw, r_pitch, l_pitch)
+                0, 0, 0.008, 0.008, 0, 0,        # Wrists (6 - r_roll, l_roll, r_pitch, l_pitch, r_yaw, l_yaw)
+                0.3,                             # R Gripper (1)
+                0.528, 0.528,                    # R Proximal (2 - dummies)
+                0.3,                             # L Gripper (1)                                     
+                0.528, 0.528,                    # L Proximal (2 - dummies)
+                -0.51, -0.51,                    # R Distal (2 - dummies)
+                -0.51, -0.51]),                  # L Distal (2 - dummies)
         ),
         right_hand_out=Keyframe(
             pose=sapien.Pose(),
-            qpos=np.array([0]*11 + [-1.6] + [0]*25),
+            qpos=([
+                0, 0, 0,                         # Base (3 - x, y, theta)
+                0,                               # Tripod (1)
+                -0.191, -0.191, 0.234, 0.234,    # Tripod bars (4 - dummies)
+                0, 0, 0,                         # Neck (3 - roll, pitch, yaw)
+                -1.6, 0, 0, 0,                   # ----- Shoulders (4 - r_pitch, l_pitch, r_roll, l_roll)
+                0, 0,                            # Antennas (2 - left, right)
+                0, 0, 0, 0,                      # Elbows (4 - r_yaw, l_yaw, r_pitch, l_pitch)
+                0, 0, 0.008, 0.008, 0, 0,        # Wrists (6 - r_roll, l_roll, r_pitch, l_pitch, r_yaw, l_yaw)
+                0.3,                             # R Gripper (1)
+                0.528, 0.528,                    # R Proximal (2 - dummies)
+                0.3,                             # L Gripper (1)                                     
+                0.528, 0.528,                    # L Proximal (2 - dummies)
+                -0.51, -0.51,                    # R Distal (2 - dummies)
+                -0.51, -0.51]),                  # L Distal (2 - dummies)
         ),
         right_hand_out_reversed=Keyframe(
             pose=sapien.Pose(),
-            qpos=np.array([0, 0, np.pi] + [0]*8 + [-1.6] + [0]*25),
+            qpos=([
+                0, 0, np.pi,                     # -----Base (3 - x, y, theta)
+                0,                               # Tripod (1)
+                -0.191, -0.191, 0.234, 0.234,    # Tripod bars (4 - dummies)
+                0, 0, 0,                         # Neck (3 - roll, pitch, yaw)
+                -1.6, 0, 0, 0,                   # ----- Shoulders (4 - r_pitch, l_pitch, r_roll, l_roll)
+                0, 0,                            # Antennas (2 - left, right)
+                0, 0, 0, 0,                      # Elbows (4 - r_yaw, l_yaw, r_pitch, l_pitch)
+                0, 0, 0.008, 0.008, 0, 0,        # Wrists (6 - r_roll, l_roll, r_pitch, l_pitch, r_yaw, l_yaw)
+                0.3,                             # R Gripper (1)
+                0.528, 0.528,                    # R Proximal (2 - dummies)
+                0.3,                             # L Gripper (1)                                     
+                0.528, 0.528,                    # L Proximal (2 - dummies)
+                -0.51, -0.51,                    # R Distal (2 - dummies)
+                -0.51, -0.51]),                  # L Distal (2 - dummies)
         )
     )
 
@@ -562,7 +604,7 @@ class Reachy2(BaseAgent):
             group=2, bit_idx=REACHY_BASE_COLLISION_BIT, bit=1
         )
 
-        # Bars
+        # Tripod Bars
         # Kinematic chains are: 
         #     base_link -> back_bar_base -> back_bar_inner -> torso
         #     torso -> left_bar_inner -> left_bar_base
