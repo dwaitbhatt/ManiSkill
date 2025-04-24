@@ -10,6 +10,7 @@ from transforms3d.euler import euler2quat
 
 from mani_skill.agents.multi_agent import MultiAgent
 from mani_skill.agents.robots.fetch import FETCH_WHEELS_COLLISION_BIT
+from mani_skill.agents.robots.reachy import REACHY_WHEELS_COLLISION_BIT, REACHY_BASE_COLLISION_BIT
 from mani_skill.utils.building.ground import build_ground
 from mani_skill.utils.scene_builder import SceneBuilder
 
@@ -188,6 +189,14 @@ class TableSceneBuilder(SceneBuilder):
 
             self.ground.set_collision_group_bit(
                 group=2, bit_idx=FETCH_WHEELS_COLLISION_BIT, bit=1
+            )
+        elif self.env.robot_uids == "reachy2":
+            qpos = self.env.agent.keyframes["right_hand_out_reversed"].qpos
+            self.env.agent.reset(qpos)
+            self.env.agent.robot.set_pose(sapien.Pose([0.6, 0, -self.table_height]))
+
+            self.ground.set_collision_group_bit(
+                group=2, bit_idx=REACHY_WHEELS_COLLISION_BIT, bit=1
             )
         elif self.env.robot_uids == ("panda", "panda"):
             agent: MultiAgent = self.env.agent

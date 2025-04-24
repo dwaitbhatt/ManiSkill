@@ -48,6 +48,14 @@ class Reachy2(BaseAgent):
         rest=Keyframe(
             pose=sapien.Pose(),
             qpos=np.zeros(37),
+        ),
+        right_hand_out=Keyframe(
+            pose=sapien.Pose(),
+            qpos=np.array([0]*11 + [-1.6] + [0]*25),
+        ),
+        right_hand_out_reversed=Keyframe(
+            pose=sapien.Pose(),
+            qpos=np.array([0, 0, np.pi] + [0]*8 + [-1.6] + [0]*25),
         )
     )
 
