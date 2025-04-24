@@ -20,6 +20,7 @@ from typing import Optional
 
 # Define a case-insensitive algorithm enum
 class Algorithm(str, Enum):
+    SAC_OLD = "SAC_OLD"
     SAC = "SAC"
     TD3 = "TD3"
     PPO = "PPO"
@@ -139,6 +140,26 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
         return f'''{git_commands} 
                     echo y | python examples/baselines/x-emb/train_source.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
+    
+    elif algo == Algorithm.SAC_OLD:
+        cmd_args = {
+            **wandb_args,
+            'env_id': env_id,
+            'robot': robot,
+            'control_mode': 'pd_joint_vel',
+            'gamma': 0.95,
+            'num_envs': '128',
+            'training_freq': '128',
+            'num_eval_steps': '100',
+            'eval_freq': '100_000',
+            'total_timesteps': total_timesteps,
+            'wandb_video_freq': '2',
+        }
+        cmd_args.update(extra_args_dict)
+        args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
+        return f'''{git_commands}
+                    echo y | python examples/baselines/sac/sac.py {args_str} \\
                     > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
     
     elif algo == Algorithm.PPO:
