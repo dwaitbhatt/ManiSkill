@@ -181,7 +181,7 @@ class ReplayBuffer:
             reward = reward.cpu()
             done = done.cpu()
 
-        obs, next_obs, action, reward, done = self.clean_samples(obs, next_obs, action, reward, done)
+        # obs, next_obs, action, reward, done = self.clean_samples(obs, next_obs, action, reward, done)
         self.obs[self.pos] = obs
         self.next_obs[self.pos] = next_obs
 
@@ -542,6 +542,8 @@ if __name__ == "__main__":
                 for k, v in final_info["episode"].items():
                     logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step)
 
+            obs, real_next_obs, actions, rewards, stop_bootstrap = rb.clean_samples(obs, real_next_obs, actions, rewards, stop_bootstrap)
+            next_obs = real_next_obs
             rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap)
 
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
