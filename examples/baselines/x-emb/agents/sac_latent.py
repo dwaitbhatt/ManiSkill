@@ -376,6 +376,19 @@ class SACTransferAgent(ActorCriticAgent):
             self.logging_tracker["losses/rew_predictor_loss"] = rew_loss.item()
 
         return rew_loss
+    
+    def get_action_recon_loss(self, data: ReplayBufferSample, global_step: int):
+        with torch.no_grad():
+            latent_obs = self.encode_obs(data.obs)
+        latent_action = self.encode_action(data.obs, data.actions)
+        decoded_action = self.decode_action(latent_obs, latent_action)
+
+        act_recon_loss = F.mse_loss(data.actions, decoded_action)
+
+        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker["losses/action_recon_loss"] = act_recon_loss.item()
+
+        return act_recon_loss
 
     def update(self, rb: ReplayBuffer, global_update: int, global_step: int):
         """
@@ -416,6 +429,7 @@ class SACTransferAgent(ActorCriticAgent):
                 self.act_encoder_optimizer.zero_grad()
 
             total_latent_loss.backward()
+
             self.q_optimizer.step()
             if not self.args.disable_obs_encoders:
                 self.obs_encoder_optimizer.step()
@@ -423,12 +437,16 @@ class SACTransferAgent(ActorCriticAgent):
                 self.latent_dynamics_optimizer.step()
             if not self.args.disable_rew_predictor:
                 self.rew_predictor_optimizer.step()
-            if not self.args.disable_act_encoder:
-                self.act_encoder_optimizer.step()
             
             if not self.args.disable_act_decoder:
                 self.act_decoder_optimizer.zero_grad()
+
             self.update_actor(data, global_step)
+            act_recon_loss = self.get_action_recon_loss(data, global_step)
+            act_recon_loss.backward()
+
+            if not self.args.disable_act_encoder:
+                self.act_encoder_optimizer.step()
             if not self.args.disable_act_decoder:
                 self.act_decoder_optimizer.step()
 
