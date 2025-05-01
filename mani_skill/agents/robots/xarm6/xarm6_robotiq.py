@@ -16,7 +16,7 @@ from mani_skill.utils.structs.actor import Actor
 @register_agent(asset_download_ids=["xarm6"])
 class XArm6Robotiq(BaseAgent):
     uid = "xarm6_robotiq"
-    urdf_path = f"{ASSET_DIR}/robots/xarm6/xarm6_robotiq.urdf"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/xarm6/xarm6_robotiq.urdf"
 
     urdf_config = dict(
         _materials=dict(
