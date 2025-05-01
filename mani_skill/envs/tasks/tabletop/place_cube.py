@@ -18,7 +18,7 @@ from mani_skill.utils.structs import Pose
 from mani_skill.utils.structs.types import Array, GPUMemoryConfig, SimConfig
 
 
-@register_env("PlaceCube-v1", max_episode_steps=50)
+@register_env("PlaceCube-v1", max_episode_steps=150)
 class PlaceCubeEnv(BaseEnv):
     """
     Task Description

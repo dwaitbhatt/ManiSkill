@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: db-maniskill-td3-placecube
+  name: db-maniskill-bc-rgbd
 spec:
   containers:
   - name: gpu-container
@@ -28,21 +28,22 @@ spec:
           #        --track \
           #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
-          "git pull && \
-          echo y | python examples/baselines/td3/td3.py \
-                 --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
-                 --env-id PlaceCube-v1 \
-                 --robot xarm6_robotiq \
-                 --control_mode pd_joint_vel \
-                 --num-envs 128 \
-                 --training-freq 128 \
-                 --num-eval-steps 100 \
-                 --eval-freq 50_000 \
-                 --total-timesteps 1_000_000 \
-                 --wandb-video-freq 2 \
-                 --wandb_reward_trajectories \
-                 --track \
-            > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-td3.log"
+          # "git fetch origin xemb-transfer && git reset --hard origin/xemb-transfer && \
+          # echo y | python examples/baselines/x-emb/train_source.py \
+          #        --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
+          #        --algorithm SAC \
+          #        --env-id PickCube-v1 \
+          #        --robot xarm6_robotiq \
+          #        --control_mode pd_joint_vel \
+          #        --exp_name PickCube_xarm6_robotiq_sac_newnets \
+          #        --num-envs 128 \
+          #        --training-freq 128 \
+          #        --num-eval-steps 100 \
+          #        --eval-freq 50_000 \
+          #        --total-timesteps 500_000 \
+          #        --wandb-video-freq 2 \
+          #        --track \
+          #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
           # "git pull && \
           # echo y | python examples/baselines/ppo/ppo.py \
@@ -61,6 +62,19 @@ spec:
           #         --track \
           #         --wandb_video_freq=2 \
           #     > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-ppo.log"
+          "
+          git fetch origin main && git reset --hard origin/main && \
+          python -m mani_skill.examples.motionplanning.xarm6.run --env-id PlaceCube-v1 --traj-name=\"trajectory\" -n 100 --only-count-success && \
+          python -m mani_skill.trajectory.replay_trajectory \
+            --traj-path demos/PlaceCube-v1/motionplanning/trajectory.h5 \
+            --use-first-env-state -c pd_joint_vel -o rgbd \
+            --save-traj --num-envs 32 -b cpu && \
+          python examples/baselines/bc/bc_rgbd.py --env-id \"PlaceCube-v1\" \
+            --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.cpu.h5 \
+            --control-mode \"pd_joint_vel\" --sim-backend \"cpu\" --max-episode-steps 150 \
+            --total-iters 1000000 --batch-size 128 --num_eval_envs 1 \
+            --track --wandb_project_name \"maniskill_experiments\" --wandb_entity \"ucsd_erl\"
+          "
         ]
     env:
     - name: WANDB_API_KEY
@@ -73,11 +87,11 @@ spec:
       name: db-cephfs-volume
     resources:
       limits:
-        nvidia.com/gpu: "2"
+        nvidia.com/gpu: "1"
         memory: "32G"
         cpu: "16"
       requests:
-        nvidia.com/gpu: "2"
+        nvidia.com/gpu: "1"
         memory: "32G"
         cpu: "12"
   restartPolicy: Never
@@ -119,6 +133,12 @@ spec:
             - "k8s-3090-01.calit2.optiputer.net"
             - "k8s-4090-01.calit2.optiputer.net"
             - "k8s-4090-02.calit2.optiputer.net"
+      - weight: 50
+        preference:
+          matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
             - "k8s-haosu-02.sdsc.optiputer.net"
             - "k8s-haosu-03.sdsc.optiputer.net"
             - "k8s-haosu-04.sdsc.optiputer.net"
@@ -141,12 +161,6 @@ spec:
             - "k8s-haosu-21.sdsc.optiputer.net"
             - "k8s-haosu-22.sdsc.optiputer.net"
             - "k8s-haosu-23.sdsc.optiputer.net"
-            - "k8s-haosu-24.sdsc.optiputer.net"
-            - "k8s-haosu-25.sdsc.optiputer.net"
-            - "k8s-haosu-26.sdsc.optiputer.net"
-            - "k8s-haosu-27.sdsc.optiputer.net"
-            - "k8s-haosu-28.sdsc.optiputer.net"
-            - "k8s-haosu-29.sdsc.optiputer.net"
       - weight: 80
         preference:
           matchExpressions:
@@ -154,26 +168,37 @@ spec:
             operator: In
             values:
             - "NVIDIA-A100-80GB-PCIe"
-            - "NVIDIA-A100-SXM4-80GB"      
+            - "NVIDIA-A100-SXM4-80GB"
+            - "NVIDIA-A100-80GB-PCIe-MIG-1g.10gb"
+            - "NVIDIA-A100-PCIE-40GB"
+            - "NVIDIA-RTX-A6000"
+            - "NVIDIA-RTX-A5000"
             - "NVIDIA-GeForce-RTX-4090"
+            - "NVIDIA-GeForce-RTX-4080"
+            - "NVIDIA-GeForce-RTX-3090-Ti"
             - "NVIDIA-GeForce-RTX-3090"
-      - weight: 15
+            - "NVIDIA-GeForce-RTX-3080-Ti"
+            - "NVIDIA-GeForce-RTX-3080"
+      - weight: 60
         preference:
           matchExpressions:
           - key: nvidia.com/gpu.product
             operator: In
             values:
             - "NVIDIA-A40"
-            - "NVIDIA-A10"
             - "Tesla-V100-SXM2-32GB"
-      - weight: 5
+            - "Tesla-V100-PCIE-16GB"
+      - weight: 50
         preference:
           matchExpressions:
           - key: nvidia.com/gpu.product
             operator: In
             values:
-            - "NVIDIA_TITAN_RTX"
-            - "NVIDIA-RTX-A6000"
+            - "NVIDIA-TITAN-RTX"
+            - "NVIDIA-GeForce-RTX-2080-Ti"
+            - "NVIDIA-TITAN-Xp"
+            - "NVIDIA-L40"
+            - "NVIDIA-A10"
   volumes:
     - name: db-cephfs-volume
       persistentVolumeClaim:
