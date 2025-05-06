@@ -187,9 +187,12 @@ class ManiSkillDataset(Dataset):
 
             # we use :-1 here to ignore the last observation as that
             # is the terminal observation which has no actions
-            self.rgb.append(trajectory["obs"]["sensor_data"]["base_camera"]["rgb"][:-1])
+            camera_name = "base_camera"
+            if camera_name not in trajectory["obs"]["sensor_data"]:
+                camera_name = list(trajectory["obs"]["sensor_data"].keys())[0]
+            self.rgb.append(trajectory["obs"]["sensor_data"][camera_name]["rgb"][:-1])
             self.depth.append(
-                trajectory["obs"]["sensor_data"]["base_camera"]["depth"][:-1]
+                trajectory["obs"]["sensor_data"][camera_name]["depth"][:-1]
             )
             self.actions.append(trajectory["actions"])
 
@@ -387,7 +390,7 @@ if __name__ == "__main__":
             **env_kwargs,
             num_envs=args.num_eval_envs,
             env_id=args.env_id,
-            env_horizon=gym_utils.find_max_episode_steps_value(envs),
+            env_horizon=150#gym_utils.find_max_episode_steps_value(envs),
         )
         wandb.init(
             project=args.wandb_project_name,
