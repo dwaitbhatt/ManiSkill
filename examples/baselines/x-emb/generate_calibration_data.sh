@@ -1,0 +1,17 @@
+# Sample videos for each robot:
+printf "\nGenerating sample video for Panda..."
+python -m mani_skill.examples.motionplanning.panda.run --env-id XembCalibration-v1 --traj-name="panda_calibration_traj" --only-count-success --save-video -n 1 --shader="rt" > /dev/null
+mv demos/XembCalibration-v1/motionplanning/0.mp4 demos/XembCalibration-v1/motionplanning/panda_calibration_traj.mp4
+
+printf "\nGenerating sample video for XArm6..."
+python -m mani_skill.examples.motionplanning.xarm6.run --env-id XembCalibration-v1 --traj-name="xarm6_calibration_traj" --only-count-success --save-video -n 1 --shader="rt" > /dev/null
+mv demos/XembCalibration-v1/motionplanning/0.mp4 demos/XembCalibration-v1/motionplanning/xarm6_calibration_traj.mp4
+
+# Generate 10 trajectories of calibration data for each robot
+printf "\nGenerating calibration data for Panda..."
+python -m mani_skill.examples.motionplanning.panda.run --env-id XembCalibration-v1 --traj-name="panda_calibration_traj_n10" --only-count-success -n 10
+
+printf "\nGenerating calibration data for XArm6... (output suppressed)"
+python -m mani_skill.examples.motionplanning.xarm6.run --env-id XembCalibration-v1 --traj-name="xarm6_calibration_traj_n10" --only-count-success -n 10 > /dev/null
+
+printf "\nFinished generating calibration data for both robots."

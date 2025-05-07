@@ -1,0 +1,42 @@
+{
+  "env_info": {
+    "env_id": "XembCalibration-v1",
+    "env_kwargs": {
+      "obs_mode": "none",
+      "control_mode": "pd_joint_pos",
+      "render_mode": "rgb_array",
+      "robot_uids": "xarm6_robotiq",
+      "reward_mode": "dense",
+      "sensor_configs": {
+        "shader_pack": "rt"
+      },
+      "human_render_camera_configs": {
+        "shader_pack": "rt"
+      },
+      "viewer_camera_configs": {
+        "shader_pack": "rt"
+      },
+      "sim_backend": "auto"
+    },
+    "max_episode_steps": 50
+  },
+  "commit_info": {
+    "commit_id": "b51052604bbd1a3d07f1956a87e374aec2714034",
+    "branch": "xemb-transfer"
+  },
+  "episodes": [
+    {
+      "episode_id": 0,
+      "episode_seed": 69,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 249,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 69
+      },
+      "success": true
+    }
+  ],
+  "source_type": "motionplanning",
+  "source_desc": "official motion planning solution from ManiSkill contributors"
+}
