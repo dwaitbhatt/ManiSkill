@@ -114,6 +114,11 @@ class XembCalibrationEnv(BaseEnv):
                 device=self.device
             )
 
+    def _get_obs_extra(self, info: Dict):
+        return {
+            "current_goal_idx": self.current_goal_idx,
+        }
+
     def evaluate(self):
         # Check if all goals have been reached in sequence
         # We need to make sure the robot is also static at the end
@@ -127,7 +132,6 @@ class XembCalibrationEnv(BaseEnv):
             "success": all_goals_reached & is_robot_static,
             "is_robot_static": is_robot_static,
             "all_goals_reached": all_goals_reached,
-            "current_goal_idx": self.current_goal_idx,
         }
 
     def _get_goal_poses_tensor(self):

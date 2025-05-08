@@ -228,11 +228,19 @@ class SACTransferAgent(ActorCriticAgent):
                                                 latent_obs=not args.disable_obs_encoders, 
                                                 latent_act=not args.disable_act_decoder).to(device)
         self.actor = self.latent_actor
+        self.latent_actor.apply(weight_init)
         self.latent_actor_optimizer = optim.Adam(self.latent_actor.parameters(), lr=args.lr)
 
-        self.personal_modules = [self.robot_obs_encoder, self.act_encoder, self.act_decoder]
-        self.shared_modules = [self.latent_actor, self.qf1, self.qf2, self.log_alpha, self.env_obs_encoder, 
-                               self.latent_forward_dynamics, self.latent_inverse_dynamics, self.rew_predictor]
+        self.personal_modules: list[nn.Module] = [
+            self.robot_obs_encoder, self.act_encoder, self.act_decoder
+        ]
+        self.shared_modules: list[nn.Module] = [
+            self.env_obs_encoder,
+            self.latent_actor, self.log_alpha, 
+            self.qf1, self.qf2, self.qf1_target, self.qf2_target,
+            self.latent_forward_dynamics, self.latent_inverse_dynamics, 
+            self.rew_predictor
+        ]
         self.all_modules = self.personal_modules + self.shared_modules
 
     def initialize_networks(self):

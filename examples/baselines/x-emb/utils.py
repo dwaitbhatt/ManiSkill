@@ -165,6 +165,10 @@ class Args:
     """whether to disable the observation encoders"""
 
     # Alignment specific parameters
+    alignment_source_traj_path: Optional[str] = None
+    """the path to the alignment source trajectories"""
+    alignment_target_traj_path: Optional[str] = None
+    """the path to the alignment target trajectories"""
     adapted_target_nets: bool = True
     """whether to use adapters for target encoder networks"""
     adapter_layers: int = 1

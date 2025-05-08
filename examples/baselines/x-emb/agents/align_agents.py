@@ -4,6 +4,7 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from replay_buffer import ReplayBufferSample
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from utils import Args
 
 class AgentAligner:
@@ -42,10 +43,9 @@ class AgentAligner:
                                         [args.mlp_dim] * args.num_layers, 
                                         1)
         self.latent_disc_optimizer = torch.optim.Adam(self.latent_disc.parameters(), lr=args.lr)
-        self.latent_gen_optimizer = torch.optim.Adam([{"params": self.target_agent.robot_obs_encoder.parameters(), "lr": args.lr},
-                                                      {"params": self.target_agent.act_encoder.parameters(), "lr": args.lr}])
-        
-        self.target_gen_optimizer = torch.optim.Adam(self.target_agent.act_decoder.parameters(), lr=args.lr)
+        self.obs_encoder_optimizer = torch.optim.Adam(self.target_agent.robot_obs_encoder.parameters(), args.lr)
+        self.act_encoder_optimizer = torch.optim.Adam(self.target_agent.act_encoder.parameters(), args.lr)
+        self.act_decoder_optimizer = torch.optim.Adam(self.target_agent.act_decoder.parameters(), lr=args.lr)
 
         self.source_agent.freeze_parameters()
 
@@ -82,25 +82,17 @@ class AgentAligner:
         return gradient_penalty
 
 
-    def update_generator(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
+    def get_latent_generator_loss(self, target_data: ReplayBufferSample, global_step: int):
         target_latent_obs = self.target_agent.encode_obs(target_data.obs)
         target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
         target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
         latent_gen_loss = -self.latent_disc(target_input).mean()
         
-        latent_dynamics_loss = self.target_agent.get_latent_dynamics_loss(target_data, global_step)
-        
-        total_gen_loss = latent_gen_loss + self.args.lambda_latent_dynamics_loss * latent_dynamics_loss
-
-        self.latent_gen_optimizer.zero_grad()
-        total_gen_loss.backward()
-        self.latent_gen_optimizer.step()
-
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/latent_gen_loss"] = latent_gen_loss.item()
-            self.logging_tracker["losses/latent_dynamics_loss"] = latent_dynamics_loss.item()
-            self.logging_tracker["losses/total_gen_loss"] = total_gen_loss.item()
         
+        return latent_gen_loss
+
 
     def update_discriminator(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
         with torch.no_grad():
@@ -128,4 +120,20 @@ class AgentAligner:
     def update(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
         for _ in range(5):
             self.update_discriminator(source_data, target_data, global_step)
-        self.update_generator(source_data, target_data, global_step)
+        
+        self.obs_encoder_optimizer.zero_grad()
+        self.act_encoder_optimizer.zero_grad()
+        self.act_decoder_optimizer.zero_grad()
+
+        latent_gen_loss = self.get_latent_generator_loss(target_data, global_step)
+        latent_dynamics_loss = self.target_agent.get_latent_dynamics_loss(target_data, global_step)
+        total_encoders_loss = latent_gen_loss + self.args.lambda_latent_dynamics_loss * latent_dynamics_loss
+        total_encoders_loss.backward()
+
+        self.obs_encoder_optimizer.step()
+
+        act_recon_loss = self.target_agent.get_action_recon_loss(target_data, global_step)
+        act_recon_loss.backward()
+
+        self.act_encoder_optimizer.step()
+        self.act_decoder_optimizer.step()

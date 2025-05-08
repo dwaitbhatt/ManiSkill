@@ -264,9 +264,9 @@ def replay_cpu_sim(
 
         reset_kwargs = episode["reset_kwargs"].copy()
         if "seed" in reset_kwargs:
-            assert reset_kwargs["seed"] == episode["episode_seed"][0]
+            assert reset_kwargs["seed"] == episode["episode_seed"]
         else:
-            reset_kwargs["seed"] = episode["episode_seed"][0]
+            reset_kwargs["seed"] = episode["episode_seed"]
         seed = reset_kwargs.pop("seed")
 
         ori_control_mode = episode["control_mode"]

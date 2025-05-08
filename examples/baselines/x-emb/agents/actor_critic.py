@@ -92,6 +92,7 @@ class ActorCriticAgent:
         self.actor_optimizer = optim.Adam(list(self.actor.parameters()), lr=args.lr)
 
         self.logging_tracker = {}
+        self.all_modules: list[nn.Module] = [self.actor, self.qf1, self.qf2, self.qf1_target, self.qf2_target]
 
     def initialize_networks(self):
         self.actor.apply(weight_init)
@@ -148,6 +149,14 @@ class ActorCriticAgent:
     
     def load_model(self, model_path: str):
         raise NotImplementedError
+
+    def train_mode(self):
+        for module in self.all_modules:
+            module.train()
+
+    def eval_mode(self):
+        for module in self.all_modules:
+            module.eval()
 
     def __repr__(self):
         repr = ""
