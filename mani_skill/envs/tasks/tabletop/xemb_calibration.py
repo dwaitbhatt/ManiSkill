@@ -15,7 +15,7 @@ from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
 
 
-@register_env("XembCalibration-v1", max_episode_steps=50)
+@register_env("XembCalibration-v1", max_episode_steps=300)
 class XembCalibrationEnv(BaseEnv):
     """
     **Task Description:**
