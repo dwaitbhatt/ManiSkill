@@ -84,9 +84,9 @@ class Args:
     eval_reconfiguration_freq: Optional[int] = 1
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
     eval_freq: int = 5000
-    """evaluation frequency in terms of iterations"""
+    """evaluation frequency in terms of timesteps"""
     save_train_video_freq: Optional[int] = None
-    """frequency to save training videos in terms of iterations"""
+    """frequency to save training videos in terms of timesteps"""
     control_mode: Optional[str] = "pd_joint_delta_pos"
     """the control mode to use for the environment"""
 
@@ -173,8 +173,10 @@ class Args:
     """the path to the alignment source trajectories"""
     alignment_target_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/xarm6_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
     """the path to the alignment target trajectories"""
-    alignment_steps: int = 100_000
-    """the number of steps to run alignment"""
+    alignment_samples: int = 100_000
+    """the number of samples to run alignment on"""
+    alignment_batch_size: int = 128
+    """the batch size for alignment"""
     adapted_target_nets: bool = True
     """whether to use adapters for target encoder networks"""
     adapter_layers: int = 1

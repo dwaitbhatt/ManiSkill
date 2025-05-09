@@ -98,7 +98,7 @@ class AgentAligner:
         target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
         latent_gen_loss = -self.latent_disc(target_input).mean()
         
-        if (global_step - 1) // self.args.log_freq < global_step // self.args.log_freq:
+        if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/latent_gen_loss"] = latent_gen_loss.item()
         
         return latent_gen_loss
@@ -122,7 +122,7 @@ class AgentAligner:
         latent_disc_loss.backward()
         self.latent_disc_optimizer.step()
 
-        if (global_step - 1) // self.args.log_freq < global_step // self.args.log_freq:
+        if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/latent_disc_loss"] = latent_disc_loss.item()
             self.logging_tracker["losses/latent_gp"] = latent_gp.item()
 
