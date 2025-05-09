@@ -199,8 +199,12 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             'env-id': env_id,
             'source_robot': robot.split('_to_')[0],
             'target_robot': robot.split('_to_')[1],
-            'alignment_steps': 100_000,
-            'eval-freq': '2_000',
+            'alignment_samples': 10_000_000,
+            'num-eval-envs': '32',
+            'log-freq': '50_000',
+            'eval-freq': '100_000',
+            'wandb-video-freq': '5',
+            'num-eval-steps': '50',
         }
         cmd_args.update(extra_args_dict)
         args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])

@@ -241,5 +241,5 @@ if __name__ == "__main__":
     if not args.evaluate and args.save_model:
         model_path = f"{args.save_model_dir}/{run_name}/final_ckpt.pt"
         agent.save_model(model_path)
-        writer.close()
+    writer.close()
     envs.close()
