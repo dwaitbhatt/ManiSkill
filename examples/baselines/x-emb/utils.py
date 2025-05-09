@@ -19,10 +19,12 @@ class Logger:
 class Args:
     exp_name: Optional[str] = None
     """the name of this experiment"""
-    algorithm: str = "TD3"
+    algorithm: str = "SAC_LATENT"
     """the actor-critic algorithm to use for the experiment (TD3 or SAC)"""
-    robot: str = "panda"
-    """which robot to use for the experiment"""
+    source_robot: str = "panda"
+    """which robot to learnt the latent policy with"""
+    target_robot: str = "xarm6_robotiq"
+    """which robot to transfer the policy to"""
     control_mode: str = "pd_joint_pos"
     """which control mode to use for the experiment"""
     seed: int = 1
@@ -37,7 +39,7 @@ class Args:
     """the wandb's project name"""
     wandb_entity: str = "ucsd_erl"
     """the entity (team) of wandb's project"""
-    wandb_group: str = "TD3"
+    wandb_group: str = "xemb_transfer_learning"
     """the group of the run for wandb"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""

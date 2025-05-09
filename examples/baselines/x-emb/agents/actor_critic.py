@@ -39,6 +39,7 @@ class NormalizedActor(nn.Module):
         h, l = envs.single_action_space.high, envs.single_action_space.low
         self.register_buffer("action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32))
         self.register_buffer("action_bias", torch.tensor((h + l) / 2.0, dtype=torch.float32))
+        self.exclude_from_copy = ["action_scale", "action_bias"]
         # These buffers are persistent and will be saved in state_dict()
 
     def forward(self, x):

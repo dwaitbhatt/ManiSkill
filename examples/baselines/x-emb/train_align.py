@@ -11,17 +11,21 @@ from mani_skill.utils import gym_utils
 import numpy as np
 import random
 from torch.utils.tensorboard import SummaryWriter
+from tqdm.auto import tqdm
 
 
 def setup_envs(args: Args):
-    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu", robot_uids=args.robot)
+    env_kwargs = dict(obs_mode="state", render_mode="rgb_array", sim_backend="gpu")
     if args.control_mode is not None:
         env_kwargs["control_mode"] = args.control_mode
-    envs = gym.make("XembCalibration-v1", num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
-    if isinstance(envs.action_space, gym.spaces.Dict):
-        envs = FlattenActionSpaceWrapper(envs)
-    envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=False)
-    return envs, env_kwargs
+    source_envs = gym.make(args.env_id, robot_uids=args.source_robot, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
+    target_envs = gym.make(args.env_id, robot_uids=args.target_robot, num_envs=args.num_envs if not args.evaluate else 1, reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
+    if isinstance(source_envs.action_space, gym.spaces.Dict):
+        source_envs = FlattenActionSpaceWrapper(source_envs)
+        target_envs = FlattenActionSpaceWrapper(target_envs)
+    source_envs = ManiSkillVectorEnv(source_envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=False)
+    target_envs = ManiSkillVectorEnv(target_envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=False)
+    return source_envs, target_envs, env_kwargs
 
 
 def main():
@@ -30,10 +34,10 @@ def main():
     args.steps_per_env = args.training_freq // args.num_envs
     if args.exp_name is None:
         args.exp_name = f"{args.algorithm.lower()}"
-        run_name = f"{args.env_id}__{args.exp_name}__{args.robot}__{args.seed}__{int(time.time())}"
+        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
-    run_name += f"__align"
+    run_name = f"align_{args.source_robot}_{args.target_robot}__{run_name}"
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -43,10 +47,9 @@ def main():
 
     device = torch.device("cuda:0" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    envs, env_kwargs = setup_envs(args)
-    max_episode_steps = gym_utils.find_max_episode_steps_value(envs._env)
+    source_envs, target_envs, env_kwargs = setup_envs(args)
+    max_episode_steps = gym_utils.find_max_episode_steps_value(source_envs._env)
 
-    print("\nRunning agent alignment")
     if args.track:
         import wandb
         config = vars(args)
@@ -60,7 +63,7 @@ def main():
             name=run_name,
             save_code=True,
             group=args.wandb_group,
-            tags=[args.algorithm.lower(), "walltime_efficient"]
+            tags=[args.algorithm.lower(), "transfer_learning"]
         )
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
@@ -71,11 +74,10 @@ def main():
 
 
     # Initialize agents
-    source_agent = SACTransferAgent(envs, device, args)
-    target_agent = SACTransferAgent(envs, device, args)
-    print(f"Total batches per epoch: {len(dataloader)}")
+    source_agent = SACTransferAgent(source_envs, device, args)
+    target_agent = SACTransferAgent(target_envs, device, args)
     
-    agent_aligner = AgentAligner(envs, device, args, source_agent, target_agent)
+    agent_aligner = AgentAligner(device, args, source_agent, target_agent)
 
     # Create dataloader using the helper function
     dataloader = create_aligned_calibration_traj_dataloader(
@@ -88,12 +90,19 @@ def main():
         shuffle_goals=False,
         normalize_states=False
     )
+    print(f"Total batches per epoch: {len(dataloader)}")
 
     # Example training loop
-    for batch_idx, batch in enumerate(dataloader):
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc="Aligning agents")):
+        update_time = time.perf_counter()
         agent_aligner.update(batch.to_source_replay_buffer_sample(), 
                              batch.to_target_replay_buffer_sample(),
                              batch_idx)
+        update_time = time.perf_counter() - update_time
+
+        if (batch_idx - 1) // args.log_freq < batch_idx // args.log_freq:
+            agent_aligner.log_losses(logger, batch_idx)
+            logger.add_scalar("time/align_update_time", update_time, batch_idx)
 
 if __name__ == "__main__":
     main()

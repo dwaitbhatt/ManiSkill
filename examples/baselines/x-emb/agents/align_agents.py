@@ -5,13 +5,12 @@ from replay_buffer import ReplayBufferSample
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import Args
+from utils import Args, Logger
 
 class AgentAligner:
-    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args, 
+    def __init__(self, device: torch.device, args: Args, 
                  source_agent: SACTransferAgent,
                  target_agent: SACTransferAgent):
-        self.envs = envs
         self.device = device
         self.args = args
         self.source_agent = source_agent
@@ -22,7 +21,7 @@ class AgentAligner:
         assert self.source_agent.latent_actor.latent_action_dim == self.target_agent.latent_actor.latent_action_dim
 
         # Copy and freeze shared (latent) modules
-        self.copy_and_freeze_components(self.target_agent.shared_modules)
+        self.copy_and_freeze_components(self.source_agent.shared_modules, self.target_agent.shared_modules)
 
         # Identical env obs encoder
         self.target_agent.env_obs_encoder.load_state_dict(self.source_agent.env_obs_encoder.state_dict())
@@ -32,16 +31,16 @@ class AgentAligner:
             # Adapters for robot obs encoder and action encoder/decoder
             copy_partial_mlp_weights(self.source_agent.robot_obs_encoder, self.target_agent.robot_obs_encoder, args.adapter_layers, -1)
             copy_partial_mlp_weights(self.source_agent.act_encoder, self.target_agent.act_encoder, args.adapter_layers, -1)
-            copy_partial_mlp_weights(self.source_agent.act_decoder, self.target_agent.act_decoder, 0, -1 - args.adapter_layers)
+            copy_partial_mlp_weights(self.source_agent.act_decoder.net, self.target_agent.act_decoder.net, 0, -1 - args.adapter_layers)
 
             if args.only_train_adapters:
                 freeze_mlp_layers(self.target_agent.robot_obs_encoder, args.adapter_layers, -1)
                 freeze_mlp_layers(self.target_agent.act_encoder, args.adapter_layers, -1)
-                freeze_mlp_layers(self.target_agent.act_decoder, 0, -1 - args.adapter_layers)
+                freeze_mlp_layers(self.target_agent.act_decoder.net, 0, -1 - args.adapter_layers)
         
         self.latent_disc = disc_mlp(self.source_agent.latent_actor.latent_obs_dim + self.source_agent.latent_actor.latent_action_dim, 
                                         [args.mlp_dim] * args.num_layers, 
-                                        1)
+                                        1).to(self.device)
         self.latent_disc_optimizer = torch.optim.Adam(self.latent_disc.parameters(), lr=args.lr)
         self.obs_encoder_optimizer = torch.optim.Adam(self.target_agent.robot_obs_encoder.parameters(), args.lr)
         self.act_encoder_optimizer = torch.optim.Adam(self.target_agent.act_encoder.parameters(), args.lr)
@@ -50,13 +49,17 @@ class AgentAligner:
         self.source_agent.freeze_parameters()
 
 
-    def copy_and_freeze_components(self, target_agent_modules: list[nn.Module]):
-        for t_module in target_agent_modules:
+    def copy_and_freeze_components(self, source_agent_modules: list[nn.Module], target_agent_modules: list[nn.Module]):
+        for s_module, t_module in zip(source_agent_modules, target_agent_modules):
             # Handle tensor parameters separately
             if isinstance(t_module, torch.Tensor):
-                t_module.data = self.source_agent.__getattribute__(t_module.__name__).data
+                t_module.data = s_module.data
             else:
-                t_module.load_state_dict(self.source_agent.__getattribute__(t_module.__name__).state_dict())
+                state_dict_to_copy = s_module.state_dict()
+                if "exclude_from_copy" in t_module.__dict__:
+                    for key in t_module.exclude_from_copy:
+                        state_dict_to_copy.pop(key)
+                t_module.load_state_dict(state_dict_to_copy, strict=False)
             t_module.requires_grad = False
         
 
@@ -80,6 +83,13 @@ class AgentAligner:
         # gradients = gradients.view(gradients.size(0), -1)
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         return gradient_penalty
+    
+
+    def pad_obs(self, data: ReplayBufferSample) -> ReplayBufferSample:
+        fake_env_obs = torch.zeros((data.obs.shape[0], self.target_agent.env_obs_dim), device=data.obs.device)
+        data.obs = torch.cat([data.obs, fake_env_obs], dim=-1)
+        data.next_obs = torch.cat([data.next_obs, fake_env_obs], dim=-1)
+        return data
 
 
     def get_latent_generator_loss(self, target_data: ReplayBufferSample, global_step: int):
@@ -88,7 +98,7 @@ class AgentAligner:
         target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
         latent_gen_loss = -self.latent_disc(target_input).mean()
         
-        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+        if (global_step - 1) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/latent_gen_loss"] = latent_gen_loss.item()
         
         return latent_gen_loss
@@ -112,12 +122,15 @@ class AgentAligner:
         latent_disc_loss.backward()
         self.latent_disc_optimizer.step()
 
-        if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
+        if (global_step - 1) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/latent_disc_loss"] = latent_disc_loss.item()
             self.logging_tracker["losses/latent_gp"] = latent_gp.item()
 
 
     def update(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
+        source_data = self.pad_obs(source_data)
+        target_data = self.pad_obs(target_data)
+        
         for _ in range(5):
             self.update_discriminator(source_data, target_data, global_step)
         
@@ -137,3 +150,8 @@ class AgentAligner:
 
         self.act_encoder_optimizer.step()
         self.act_decoder_optimizer.step()
+
+
+    def log_losses(self, logger: Logger, global_step: int):
+        for k, v in self.logging_tracker.items():
+            logger.add_scalar(k, v, global_step)
