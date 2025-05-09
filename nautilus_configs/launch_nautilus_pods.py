@@ -16,7 +16,7 @@ import tyro
 from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Optional, Annotated
 
 # Define a case-insensitive algorithm enum
 class Algorithm(str, Enum):
@@ -31,30 +31,69 @@ class Algorithm(str, Enum):
 class NautilusPodConfig:
     """Configuration for launching Nautilus pods with different random seeds."""
     
-    algo: Algorithm = "td3"
-    """Algorithm to use (sac, td3, ppo, sac_latent, dummy, case-insensitive)"""
+    algo: Annotated[Algorithm, 
+                    tyro.conf.arg(
+                        name="algo", 
+                        help="Algorithm to use (sac, td3, ppo, sac_latent, dummy, case-insensitive)",
+                        aliases=["-a"]
+                    )] = "td3"
     
-    robot: str = "xarm6_robotiq"
-    """Robot to use (e.g., xarm6_robotiq)"""
+    robot: Annotated[str, 
+                    tyro.conf.arg(
+                        name="robot", 
+                        help="Robot to use (e.g., xarm6_robotiq)",
+                        aliases=["-r"]
+                    )] = "xarm6_robotiq"
     
-    env_id: str = "PickCube-v1"
-    """Environment ID (e.g., PickCube-v1)"""
+    env_id: Annotated[str, 
+                    tyro.conf.arg(
+                        name="env_id", 
+                        help="Environment ID (e.g., PickCube-v1)",
+                        aliases=["-e"]
+                    )] = "PickCube-v1"
     
-    exp_suffix: str = ""
-    """Suffix for the experiment name (e.g., 'newnets_fixed_long')"""
+    exp_suffix: Annotated[str, 
+                        tyro.conf.arg(
+                            name="exp_suffix", 
+                            help="Suffix for the experiment name (e.g., 'newnets_fixed_long')",
+                            aliases=["-x"]
+                        )] = ""
     
-    total_timesteps: str = "1_000_000"
-    """Total timesteps (e.g., 1_000_000)"""
+    total_timesteps: Annotated[str, 
+                              tyro.conf.arg(
+                                  name="total_timesteps", 
+                                  help="Total timesteps (e.g., 1_000_000)",
+                                  aliases=["-t"]
+                              )] = "1_000_000"
     
-    branch: str = "xemb-transfer"
-    """Git branch to use for the experiment"""
+    branch: Annotated[str, 
+                    tyro.conf.arg(
+                        name="branch", 
+                        help="Git branch to use for the experiment",
+                        aliases=["-b"]
+                    )] = "xemb-transfer"
     
-    num_pods: int = 4
-    """Number of pods to launch"""
+    num_pods: Annotated[int, 
+                        tyro.conf.arg(
+                            name="num_pods", 
+                            help="Number of pods to launch",
+                            aliases=["-n"]
+                        )] = 4
 
-    jobs: bool = False
-    """Whether to launch jobs instead of pods"""
+    jobs: Annotated[bool, 
+                    tyro.conf.arg(
+                        name="jobs", 
+                        help="Whether to launch jobs instead of pods",
+                        aliases=["-j"]
+                    )] = False
     
+    save_models: Annotated[bool, 
+                          tyro.conf.arg(
+                              name="save_models", 
+                              help="Whether to save models to persistent volume",
+                              aliases=["-s"]
+                          )] = False
+
     yaml_file: Optional[str] = None
     """YAML kubernetes config file to use as template"""
     
@@ -82,12 +121,20 @@ def generate_experiment_name(env_id: str, robot: str, algo: Algorithm, suffix: s
 def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str, 
                     total_timesteps: str, seed: int, branch: str,
                     wandb_entity: str, wandb_project: str, run_name: str,
-                    extra_cmd_args: str = "") -> str:
+                    extra_cmd_args: str = "",
+                    save_models: bool = False) -> str:
     """Generate the command based on the algorithm and parameters."""
     timestamp_log = "$(date +%Y-%m-%d_%H-%M-%S)"
     
     # Git commands to reset to the specified branch
-    git_commands = f'''git fetch origin {branch} && git reset --hard origin/{branch} && '''
+    git_commands = f'''git fetch origin {branch} && git reset --hard origin/{branch}'''
+
+    # Command to copy saved models to persistent volume
+    copy_saved_models_command = ":"
+    if save_models:
+        copy_saved_models_command = f'''printf \"\nCopying saved models to persistent volume...\" && \\
+                                    mkdir -p /pers_vol/dwait/saved_models/ && \\
+                                    cp -r runs/ /pers_vol/dwait/saved_models/'''
     
     # Parse extra command arguments into a dictionary
     extra_args_dict = {}
@@ -138,10 +185,9 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         
         # Build the command string
         args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        return f'''{git_commands} 
-                    echo y | python examples/baselines/x-emb/train_source.py {args_str} \\
+        main_cmd = f'''echo y | python examples/baselines/x-emb/train_source.py {args_str} \\
                     > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-    
+
     elif algo == Algorithm.SAC_OLD:
         cmd_args = {
             **wandb_args,
@@ -158,10 +204,9 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         }
         cmd_args.update(extra_args_dict)
         args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        return f'''{git_commands}
-                    echo y | python examples/baselines/sac/sac.py {args_str} \\
+        main_cmd = f'''echo y | python examples/baselines/sac/sac.py {args_str} \\
                     > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-    
+
     elif algo == Algorithm.PPO:
         # Base arguments for PPO
         cmd_args = {
@@ -187,12 +232,15 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         
         # Build the command string
         args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        return f'''{git_commands}
-                    echo y | python examples/baselines/ppo/ppo.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-    
+        main_cmd = f'''echo y | python examples/baselines/ppo/ppo.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log"
+''' 
     elif algo == Algorithm.DUMMY:
-        return f"{git_commands} sleep infinity"
+        main_cmd = "sleep infinity"
+
+    return f'''{git_commands} && \\
+            {main_cmd} && \\
+            {copy_saved_models_command}'''
 
 
 def launch_pod(yaml_file: str, pod_name: str, command: str, jobs: bool = False) -> None:
@@ -218,6 +266,7 @@ def launch_pod(yaml_file: str, pod_name: str, command: str, jobs: bool = False) 
         print(f"Failed to launch {pod_name}: {e}\n")
     finally:
         os.unlink(temp_file_path)
+
 
 def main() -> None:
     config = tyro.cli(NautilusPodConfig)
@@ -268,7 +317,8 @@ def main() -> None:
             config.algo, config.robot, config.env_id, exp_name, 
             config.total_timesteps, seed, config.branch,
             config.wandb_entity, config.wandb_project, run_name,
-            extra_cmd_args=config.extra
+            extra_cmd_args=config.extra,
+            save_models=config.save_models
         )
         
         print(f"Launching {nautilus_type} {i+1}/{config.num_pods} with seed {seed}...")
