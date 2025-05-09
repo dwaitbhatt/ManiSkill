@@ -167,9 +167,9 @@ class Args:
     """whether to disable the observation encoders"""
 
     # Alignment specific parameters
-    alignment_source_traj_path: Optional[str] = "/home/dwait/ManiSkill/demos/XembCalibration-v1/motionplanning/panda_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
+    alignment_source_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/panda_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
     """the path to the alignment source trajectories"""
-    alignment_target_traj_path: Optional[str] = "/home/dwait/ManiSkill/demos/XembCalibration-v1/motionplanning/xarm6_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
+    alignment_target_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/xarm6_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
     """the path to the alignment target trajectories"""
     alignment_steps: int = 100_000
     """the number of steps to run alignment"""

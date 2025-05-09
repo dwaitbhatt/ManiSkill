@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Annotated
 
-# Define a case-insensitive algorithm enum
 class Algorithm(str, Enum):
     SAC_OLD = "SAC_OLD"
     SAC = "SAC"
@@ -26,6 +25,7 @@ class Algorithm(str, Enum):
     PPO = "PPO"
     SAC_LATENT = "SAC_LATENT"
     DUMMY = "DUMMY"
+    ALIGN = "ALIGN"
 
 @dataclass
 class NautilusPodConfig:
@@ -34,14 +34,14 @@ class NautilusPodConfig:
     algo: Annotated[Algorithm, 
                     tyro.conf.arg(
                         name="algo", 
-                        help="Algorithm to use (sac, td3, ppo, sac_latent, dummy, case-insensitive)",
+                        help="Algorithm to use (SAC, TD3, PPO, SAC_LATENT, DUMMY, ALIGN, case-sensitive)",
                         aliases=["-a"]
-                    )] = "td3"
+                    )] = "SAC_LATENT"
     
     robot: Annotated[str, 
                     tyro.conf.arg(
                         name="robot", 
-                        help="Robot to use (e.g., xarm6_robotiq)",
+                        help="Robot to use (e.g., xarm6_robotiq). For alignment, use robot1_to_robot2 (e.g., panda_to_xarm6_robotiq)",
                         aliases=["-r"]
                     )] = "xarm6_robotiq"
     
@@ -180,12 +180,31 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             'wandb-video-freq': '2',
         }
         
+        if algo == Algorithm.SAC_LATENT:
+            cmd_args['source_robot'] = robot
+            cmd_args.pop('robot')
+        
         # Override with any extra arguments
         cmd_args.update(extra_args_dict)
         
         # Build the command string
         args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
         main_cmd = f'''echo y | python examples/baselines/x-emb/train_source.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
+        
+    elif algo == Algorithm.ALIGN:
+        cmd_args = {
+            **wandb_args,
+            'algorithm': algo.value.upper(),
+            'env-id': env_id,
+            'source_robot': robot.split('_to_')[0],
+            'target_robot': robot.split('_to_')[1],
+            'alignment_steps': 100_000,
+            'eval-freq': '2_000',
+        }
+        cmd_args.update(extra_args_dict)
+        args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
+        main_cmd = f'''echo y | python examples/baselines/x-emb/train_align.py {args_str} \\
                     > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
 
     elif algo == Algorithm.SAC_OLD:
@@ -309,7 +328,7 @@ def main() -> None:
         pod_name = f"maniskill-{timestamp}-{config.branch}-{config.exp_suffix}-seed{seed}"        
         pod_name = pod_name.replace('_', '-').lower()
         
-        # Run name format: [prefix]_[env]_[robot]_[algo]_seed[seed]
+        # Run name format: [env]_[robot]_[algo]_[suffix]_seed[seed]
         env_short = config.env_id.split('-')[0].lower()  # Use just the env name without version
         run_name = f"{env_short}_{config.robot}_{config.algo.value}_{config.exp_suffix}_seed{seed}"
         
