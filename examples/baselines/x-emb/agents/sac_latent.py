@@ -483,6 +483,8 @@ class SACTransferAgent(ActorCriticAgent):
     def load_model(self, model_path: str):
         checkpoint = torch.load(model_path)
         self.latent_actor.load_state_dict(checkpoint['latent_actor'])
+        self.qf1.load_state_dict(checkpoint['qf1'])
+        self.qf2.load_state_dict(checkpoint['qf2'])
         self.qf1_target.load_state_dict(checkpoint['qf1'])
         self.qf2_target.load_state_dict(checkpoint['qf2'])
         self.log_alpha = checkpoint['log_alpha']

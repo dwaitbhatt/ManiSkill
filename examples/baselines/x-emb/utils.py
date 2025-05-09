@@ -167,6 +167,8 @@ class Args:
     """whether to disable the observation encoders"""
 
     # Alignment specific parameters
+    source_trained_model_path: Optional[str] = "examples/baselines/x-emb/source_panda_final_ckpt.pt"
+    """the path to the source trained model"""
     alignment_source_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/panda_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
     """the path to the alignment source trajectories"""
     alignment_target_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/xarm6_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"

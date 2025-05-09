@@ -75,6 +75,8 @@ def main():
 
     # Initialize agents
     source_agent = SACTransferAgent(source_envs, device, args)
+    if args.source_trained_model_path is not None:
+        source_agent.load_model(args.source_trained_model_path)
     target_agent = SACTransferAgent(target_envs, device, args)
     
     agent_aligner = AgentAligner(device, args, source_agent, target_agent)
