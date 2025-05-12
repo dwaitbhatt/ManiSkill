@@ -1,7 +1,7 @@
 from agents import ActorCriticAgent, SACTransferAgent
 from layers import copy_partial_mlp_weights, freeze_mlp_layers, disc_mlp
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
-from replay_buffer import ReplayBufferSample
+from replay_buffer import ReplayBuffer, ReplayBufferSample
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -164,3 +164,84 @@ class AgentAligner:
     def log_losses(self, logger: Logger, global_step: int):
         for k, v in self.logging_tracker.items():
             logger.add_scalar(k, v, global_step)
+
+
+class JointTrainer(AgentAligner):
+    def __init__(self, device: torch.device, args: Args, 
+                 source_agent: SACTransferAgent,
+                 target_agent: SACTransferAgent):
+        self.device = device
+        self.args = args
+        self.source_agent = source_agent
+        self.target_agent = target_agent
+        self.logging_tracker = {}
+
+        assert self.source_agent.latent_actor.latent_obs_dim == self.target_agent.latent_actor.latent_obs_dim
+        assert self.source_agent.latent_actor.latent_action_dim == self.target_agent.latent_actor.latent_action_dim
+
+        del self.target_agent.env_obs_encoder
+        self.target_agent.env_obs_encoder = self.source_agent.env_obs_encoder
+        del self.target_agent.latent_actor
+        self.target_agent.latent_actor = self.source_agent.latent_actor
+        del self.target_agent.log_alpha
+        self.target_agent.log_alpha = self.source_agent.log_alpha
+        del self.target_agent.latent_forward_dynamics
+        self.target_agent.latent_forward_dynamics = self.source_agent.latent_forward_dynamics
+        del self.target_agent.latent_inverse_dynamics
+        self.target_agent.latent_inverse_dynamics = self.source_agent.latent_inverse_dynamics
+        del self.target_agent.rew_predictor
+        self.target_agent.rew_predictor = self.source_agent.rew_predictor
+
+        self.target_agent.shared_modules = [
+            self.target_agent.env_obs_encoder,
+            self.target_agent.latent_actor, self.target_agent.log_alpha, 
+            self.target_agent.latent_forward_dynamics, self.target_agent.latent_inverse_dynamics, 
+            self.target_agent.rew_predictor
+        ]
+
+        # Ensure all shared modules not just same arch and params, but the same objects 
+        for s_module, t_module in zip(self.source_agent.shared_modules, self.target_agent.shared_modules):
+            assert s_module is t_module, f"Shared modules are not the same object: {s_module} != {t_module}"
+
+        del self.target_agent.obs_encoder_optimizer
+        self.target_agent.obs_encoder_optimizer = torch.optim.Adam([
+                {'params': self.target_agent.robot_obs_encoder.parameters()},
+                {'params': self.target_agent.env_obs_encoder.parameters()},
+            ], lr=args.lr * args.enc_lr_scale)
+        
+        del self.target_agent.latent_actor_optimizer
+        self.target_agent.latent_actor_optimizer = torch.optim.Adam(self.target_agent.latent_actor.parameters(), lr=args.lr)
+        
+        del self.target_agent.a_optimizer
+        self.target_agent.alpha = self.target_agent.log_alpha.exp().item()
+        self.target_agent.a_optimizer = torch.optim.Adam([self.target_agent.log_alpha], lr=args.lr)
+        
+        del self.target_agent.latent_dynamics_optimizer
+        self.target_agent.latent_dynamics_optimizer = torch.optim.Adam([
+                {'params': self.target_agent.latent_forward_dynamics.parameters()},
+                {'params': self.target_agent.latent_inverse_dynamics.parameters()},
+            ], lr=args.lr)
+            
+        del self.target_agent.rew_predictor_optimizer
+        self.target_agent.rew_predictor_optimizer = torch.optim.Adam(self.target_agent.rew_predictor.parameters(), lr=args.lr)
+
+        if args.adapted_target_nets:
+            # Adapters for robot obs encoder and action encoder/decoder
+            copy_partial_mlp_weights(self.source_agent.robot_obs_encoder, self.target_agent.robot_obs_encoder, args.adapter_layers, -1)
+            copy_partial_mlp_weights(self.source_agent.act_encoder, self.target_agent.act_encoder, args.adapter_layers, -1)
+            copy_partial_mlp_weights(self.source_agent.act_decoder.net, self.target_agent.act_decoder.net, 0, -1 - args.adapter_layers)
+
+            if args.only_train_adapters:
+                freeze_mlp_layers(self.target_agent.robot_obs_encoder, args.adapter_layers, -1)
+                freeze_mlp_layers(self.target_agent.act_encoder, args.adapter_layers, -1)
+                freeze_mlp_layers(self.target_agent.act_decoder.net, 0, -1 - args.adapter_layers)
+        
+    def update(self, source_buffer: ReplayBuffer, target_buffer: ReplayBuffer, global_update: int, global_step: int):
+        global_update_target = global_update
+        global_update = self.source_agent.update(source_buffer, global_update, global_step)
+        global_update = self.target_agent.update(target_buffer, global_update_target, global_step)
+        return global_update
+
+    def log_losses(self, logger: Logger, global_step: int):
+        self.source_agent.log_losses(logger, global_step)
+        self.target_agent.log_losses(logger, global_step)

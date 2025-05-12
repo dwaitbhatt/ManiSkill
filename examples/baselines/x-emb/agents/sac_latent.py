@@ -131,7 +131,9 @@ class ActionDecoder(NormalizedActor):
 
 
 class SACTransferAgent(ActorCriticAgent):
-    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args):
+    def __init__(self, envs: ManiSkillVectorEnv, device: torch.device, args: Args, name: str = "source"):
+        self.agent_name = name
+
         self.robot_obs_dim = 0
         for v in envs.unwrapped._get_obs_agent().values():
             self.robot_obs_dim += len(v[0])
@@ -315,10 +317,10 @@ class SACTransferAgent(ActorCriticAgent):
             self.alpha = self.log_alpha.exp().item()
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
-            self.logging_tracker["losses/actor_loss"] = latent_actor_loss.item()
-            self.logging_tracker["losses/alpha"] = self.alpha
+            self.logging_tracker[f"losses/{self.agent_name}_actor_loss"] = latent_actor_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_alpha"] = self.alpha
             if self.args.autotune:
-                self.logging_tracker["losses/alpha_loss"] = alpha_loss.item()
+                self.logging_tracker[f"losses/{self.agent_name}_alpha_loss"] = alpha_loss.item()
         
     def get_critic_loss(self, data: ReplayBufferSample, global_step: int):
         # Latent projections
@@ -343,11 +345,11 @@ class SACTransferAgent(ActorCriticAgent):
         qf_loss = qf1_loss + qf2_loss
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
-            self.logging_tracker["losses/qf1_values"] = math_utils.two_hot_inv(qf1_a_values, self.args).mean().item()
-            self.logging_tracker["losses/qf2_values"] = math_utils.two_hot_inv(qf2_a_values, self.args).mean().item()
-            self.logging_tracker["losses/qf1_loss"] = qf1_loss.item()
-            self.logging_tracker["losses/qf2_loss"] = qf2_loss.item()
-            self.logging_tracker["losses/qf_loss"] = qf_loss.item() / 2.0
+            self.logging_tracker[f"losses/{self.agent_name}_qf1_values"] = math_utils.two_hot_inv(qf1_a_values, self.args).mean().item()
+            self.logging_tracker[f"losses/{self.agent_name}_qf2_values"] = math_utils.two_hot_inv(qf2_a_values, self.args).mean().item()
+            self.logging_tracker[f"losses/{self.agent_name}_qf1_loss"] = qf1_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_qf2_loss"] = qf2_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_qf_loss"] = qf_loss.item() / 2.0
         
         return qf_loss
 
@@ -369,9 +371,9 @@ class SACTransferAgent(ActorCriticAgent):
         latent_dynamics_loss = latent_forward_dynamics_loss + latent_inverse_dynamics_loss
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
-            self.logging_tracker["losses/latent_dynamics_loss"] = latent_dynamics_loss.item()
-            self.logging_tracker["losses/latent_forward_dynamics_loss"] = latent_forward_dynamics_loss.item()
-            self.logging_tracker["losses/latent_inverse_dynamics_loss"] = latent_inverse_dynamics_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_latent_dynamics_loss"] = latent_dynamics_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_latent_forward_dynamics_loss"] = latent_forward_dynamics_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_latent_inverse_dynamics_loss"] = latent_inverse_dynamics_loss.item()
 
         return latent_dynamics_loss
 
@@ -383,7 +385,7 @@ class SACTransferAgent(ActorCriticAgent):
         rew_loss = math_utils.soft_ce(pred_rew, data.rewards[:, None], self.args).mean()
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
-            self.logging_tracker["losses/rew_predictor_loss"] = rew_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_rew_predictor_loss"] = rew_loss.item()
 
         return rew_loss
     
@@ -396,7 +398,7 @@ class SACTransferAgent(ActorCriticAgent):
         act_recon_loss = F.mse_loss(data.actions, decoded_action)
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
-            self.logging_tracker["losses/action_recon_loss"] = act_recon_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_action_recon_loss"] = act_recon_loss.item()
 
         return act_recon_loss
 
