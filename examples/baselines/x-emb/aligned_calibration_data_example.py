@@ -37,7 +37,7 @@ def main():
         goal_indices = batch.current_goal_idx
         
         # Print shapes and goal indices for verification
-        print(f"Batch {batch_idx}:")
+        print(f"\nBatch {batch_idx}:")
         print(f"Source obs shape: {source_obs.shape}")
         print(f"Target obs shape: {target_obs.shape}")
         print(f"Goal indices unique values: {goal_indices.unique().tolist()}")  # Should only have one unique value per batch

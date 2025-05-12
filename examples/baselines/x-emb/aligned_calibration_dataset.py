@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional
 from mani_skill.utils.io_utils import load_json
 from tqdm import tqdm
 from replay_buffer import ReplayBufferSample
+import random
 
 
 @dataclass
@@ -200,6 +201,8 @@ class AlignedCalibrationTrajDataset:
         Pre-compute tensors for efficient indexing during sampling.
         This method creates flattened tensors of episode indices, timestep indices,
         and goal indices for both source and target datasets.
+        
+        Additionally, it creates a mapping of relative positions within each goal index group.
         """
         # Create flattened tensors for source dataset
         source_ep_indices = []
@@ -213,12 +216,32 @@ class AlignedCalibrationTrajDataset:
         self._source_dones_flat = []
         self._source_rewards_flat = []
         
+        # Track relative positions within each goal index group
+        self._source_relative_positions = {}
+        self._source_relative_counter = {}  # Counter for each goal index
+        for goal_idx in range(7):  # 0 to 6
+            self._source_relative_positions[f"goal_{goal_idx}"] = {}
+        
         for ep_idx, episode in enumerate(self.source_episodes):
             current_goal_idx = episode["current_goal_idx"]
             num_steps = len(current_goal_idx)
-            
+            for goal_idx in range(7):
+                self._source_relative_counter[goal_idx] = 0
+
             ep_indices = [ep_idx] * num_steps
             t_indices = list(range(num_steps))
+            
+            # Group by goal index and track relative positions
+            for t, goal_idx_tensor in enumerate(current_goal_idx):
+                goal_idx = goal_idx_tensor.item()
+                # Store the flat index in the appropriate goal_idx group
+                flat_idx = len(source_ep_indices) + t
+                # Store the position with the current counter for this goal_idx
+                if f"tstep_{self._source_relative_counter[goal_idx]}" not in self._source_relative_positions[f"goal_{goal_idx}"]:
+                    self._source_relative_positions[f"goal_{goal_idx}"][f"tstep_{self._source_relative_counter[goal_idx]}"] = []
+                self._source_relative_positions[f"goal_{goal_idx}"][f"tstep_{self._source_relative_counter[goal_idx]}"].append(flat_idx)
+                # Increment the counter for this goal_idx
+                self._source_relative_counter[goal_idx] += 1
             
             source_ep_indices.extend(ep_indices)
             source_t_indices.extend(t_indices)
@@ -243,12 +266,32 @@ class AlignedCalibrationTrajDataset:
         self._target_dones_flat = []
         self._target_rewards_flat = []
         
+        # Track relative positions within each goal index group
+        self._target_relative_positions = {}
+        self._target_relative_counter = {}  # Counter for each goal index
+        for goal_idx in range(7):  # 0 to 6
+            self._target_relative_positions[f"goal_{goal_idx}"] = {}
+        
         for ep_idx, episode in enumerate(self.target_episodes):
             current_goal_idx = episode["current_goal_idx"]
             num_steps = len(current_goal_idx)
-            
+            for goal_idx in range(7):
+                self._target_relative_counter[goal_idx] = 0
+
             ep_indices = [ep_idx] * num_steps
             t_indices = list(range(num_steps))
+            
+            # Group by goal index and track relative positions
+            for t, goal_idx_tensor in enumerate(current_goal_idx):
+                goal_idx = goal_idx_tensor.item()
+                # Store the flat index in the appropriate goal_idx group
+                flat_idx = len(target_ep_indices) + t
+                # Store the position with the current counter for this goal_idx
+                if f"tstep_{self._target_relative_counter[goal_idx]}" not in self._target_relative_positions[f"goal_{goal_idx}"]:
+                    self._target_relative_positions[f"goal_{goal_idx}"][f"tstep_{self._target_relative_counter[goal_idx]}"] = []
+                self._target_relative_positions[f"goal_{goal_idx}"][f"tstep_{self._target_relative_counter[goal_idx]}"].append(flat_idx)
+                # Increment the counter for this goal_idx
+                self._target_relative_counter[goal_idx] += 1
             
             target_ep_indices.extend(ep_indices)
             target_t_indices.extend(t_indices)
@@ -283,20 +326,21 @@ class AlignedCalibrationTrajDataset:
         self._target_dones_flat = torch.cat(self._target_dones_flat, dim=0)
         self._target_rewards_flat = torch.cat(self._target_rewards_flat, dim=0)
         
+        # Print statistics
         print(f"Prepared index tensors with {len(self._source_goal_indices)} source timesteps " 
               f"and {len(self._target_goal_indices)} target timesteps")
     
     def sample_batch(self, batch_size: int, goal_idx: Optional[int] = None) -> AlignedTrajDataSample:
         """
         Sample a batch of data points with matching goal indices from both datasets.
-        Uses fully vectorized operations for maximum efficiency.
+        Ensures that paired samples are from the same relative position within their respective goal_idx arrays.
         
         Args:
             batch_size: Number of samples in the batch
             goal_idx: If provided, sample only from this goal index. Otherwise, randomly select a goal index.
             
         Returns:
-            AlignmentDataSample containing batched data
+            AlignedTrajDataSample containing batched data
         """
         # If goal_idx is not provided, randomly select one
         if goal_idx is None:
@@ -305,22 +349,34 @@ class AlignedCalibrationTrajDataset:
         # Prepare index tensors if not already done
         if not hasattr(self, '_source_goal_indices'):
             self._prepare_index_tensors()
-            
-        # Get the indices for the specified goal_idx
-        source_goal_mask = self._source_goal_indices == goal_idx
-        target_goal_mask = self._target_goal_indices == goal_idx
         
-        # Count how many timesteps have this goal index
-        source_count = source_goal_mask.sum().item()
-        target_count = target_goal_mask.sum().item()
+        # Get the number of samples available for this goal_idx in both datasets
+        source_count = len(self._source_relative_positions[f"goal_{goal_idx}"])
+        target_count = len(self._target_relative_positions[f"goal_{goal_idx}"])
         
-        # Sample random indices for the specified goal index
-        source_flat_indices = torch.nonzero(source_goal_mask, as_tuple=True)[0]
-        target_flat_indices = torch.nonzero(target_goal_mask, as_tuple=True)[0]
+        if source_count == 0 or target_count == 0:
+            raise ValueError(f"No samples available for goal_idx {goal_idx} in one of the datasets")
         
-        # Randomly select batch_size indices
-        source_batch_indices = source_flat_indices[torch.randint(0, source_count, (batch_size,), device=self.device)]
-        target_batch_indices = target_flat_indices[torch.randint(0, target_count, (batch_size,), device=self.device)]
+        # Sample relative positions for this goal_idx
+        # These are indices into the _source_relative_positions[f"goal_{goal_idx}"] list
+        rel_pos_indices = torch.randint(0, source_count, (batch_size,), device=self.device)
+        
+        # Get the corresponding flat indices in the source dataset
+        source_batch_indices = torch.tensor(
+            [random.choice(
+                self._source_relative_positions[f"goal_{goal_idx}"][f"tstep_{min(idx.item(), source_count - 1)}"]
+            ) for idx in rel_pos_indices],
+            device=self.device
+        )
+        
+        # Get the corresponding flat indices in the target dataset
+        # If the relative position exceeds the target count, use the last available position
+        target_batch_indices = torch.tensor(
+            [random.choice(
+                self._target_relative_positions[f"goal_{goal_idx}"][f"tstep_{min(idx.item(), target_count - 1)}"]
+            ) for idx in rel_pos_indices],
+            device=self.device
+        )
         
         # Directly index the flattened data tensors for maximum efficiency
         source_obs = self._source_obs_flat[source_batch_indices]
@@ -328,7 +384,7 @@ class AlignedCalibrationTrajDataset:
         source_actions = self._source_actions_flat[source_batch_indices]
         source_dones = self._source_dones_flat[source_batch_indices]
         source_rewards = self._source_rewards_flat[source_batch_indices]
-        goal_idx_batch = self._source_goal_indices[source_batch_indices]
+        goal_idx_batch = torch.full((batch_size,), goal_idx, dtype=torch.long, device=self.device)
         
         target_obs = self._target_obs_flat[target_batch_indices]
         target_next_obs = self._target_next_obs_flat[target_batch_indices]
