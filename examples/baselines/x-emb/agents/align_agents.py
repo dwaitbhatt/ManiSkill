@@ -140,7 +140,7 @@ class AgentAligner:
         source_data = self.pad_obs(source_data)
         target_data = self.pad_obs(target_data)
         
-        for _ in range(5):
+        for _ in range(self.args.discriminator_update_freq):
             self.update_discriminator(source_data, target_data, global_step)
         
         self.obs_encoder_optimizer.zero_grad()

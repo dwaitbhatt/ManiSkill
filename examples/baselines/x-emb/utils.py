@@ -189,6 +189,8 @@ class Args:
     """the lambda for the latent gradient penalty"""
     lambda_latent_dynamics_loss: float = 10.0
     """the lambda for the latent dynamics loss"""
+    discriminator_update_freq: int = 5
+    """the frequency of updating the discriminator"""
 
     training_freq: int = 64
     """training frequency (in steps)"""
