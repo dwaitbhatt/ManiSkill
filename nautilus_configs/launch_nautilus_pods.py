@@ -26,6 +26,7 @@ class Algorithm(str, Enum):
     SAC_LATENT = "SAC_LATENT"
     DUMMY = "DUMMY"
     ALIGN = "ALIGN"
+    JOINT = "JOINT"
 
 @dataclass
 class NautilusPodConfig:
@@ -169,7 +170,7 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             **wandb_args,
             'algorithm': algo.value.upper(),
             'env-id': env_id,
-            'robot': robot,
+            'source_robot': robot,
             'control_mode': 'pd_joint_vel',
             'seed': str(seed),
             'num-envs': '128',
@@ -199,16 +200,39 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             'env-id': env_id,
             'source_robot': robot.split('_to_')[0],
             'target_robot': robot.split('_to_')[1],
-            'alignment_samples': 10_000_000,
+            'control_mode': 'pd_joint_vel',
+            'seed': str(seed),
             'num-eval-envs': '32',
+            'num-eval-steps': '50',
             'log-freq': '50_000',
             'eval-freq': '100_000',
+            'alignment_samples': total_timesteps,
             'wandb-video-freq': '5',
-            'num-eval-steps': '50',
         }
         cmd_args.update(extra_args_dict)
         args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
         main_cmd = f'''echo y | python examples/baselines/x-emb/train_align.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
+
+    elif algo == Algorithm.JOINT:
+        cmd_args = {
+            **wandb_args,
+            'algorithm': algo.value.upper(),
+            'env-id': env_id,
+            'source_robot': robot.split('_to_')[0],
+            'target_robot': robot.split('_to_')[1],
+            'control_mode': 'pd_joint_vel',
+            'seed': str(seed),
+            'num-envs': '128',
+            'training-freq': '128',
+            'num-eval-steps': '100',
+            'eval-freq': '50_000',
+            'total-timesteps': total_timesteps,
+            'wandb-video-freq': '2',
+        }
+        cmd_args.update(extra_args_dict)
+        args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
+        main_cmd = f'''echo y | python examples/baselines/x-emb/train_joint.py {args_str} \\
                     > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
 
     elif algo == Algorithm.SAC_OLD:
