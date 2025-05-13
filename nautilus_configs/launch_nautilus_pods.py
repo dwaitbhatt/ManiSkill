@@ -181,10 +181,6 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             'wandb-video-freq': '2',
         }
         
-        if algo == Algorithm.SAC_LATENT:
-            cmd_args['source_robot'] = robot
-            cmd_args.pop('robot')
-        
         # Override with any extra arguments
         cmd_args.update(extra_args_dict)
         

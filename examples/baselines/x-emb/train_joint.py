@@ -22,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tyro
 
 
-def evaluate(agent: ActorCriticAgent, eval_envs: gym.Env, args: Args, logger: Logger, global_step: int):
+def evaluate(agent: SACTransferAgent, eval_envs: gym.Env, args: Args, logger: Logger, global_step: int):
     agent.actor.eval()
     stime = time.perf_counter()
     eval_obs, _ = eval_envs.reset()
@@ -41,7 +41,7 @@ def evaluate(agent: ActorCriticAgent, eval_envs: gym.Env, args: Args, logger: Lo
         mean = torch.stack(v).float().mean()
         eval_metrics_mean[k] = mean
         if logger is not None:
-            logger.add_scalar(f"eval/{k}", mean, global_step)
+            logger.add_scalar(f"eval/{agent.agent_name}_{k}", mean, global_step)
     pbar.set_description(
         f"success_once: {eval_metrics_mean['success_once']:.2f}, "
         f"return: {eval_metrics_mean['return']:.2f}"
@@ -214,7 +214,7 @@ if __name__ == "__main__":
         if args.eval_freq > 0 and (global_step - args.training_freq) // args.eval_freq < global_step // args.eval_freq:
             # evaluate
             evaluate(source_agent, source_eval_envs, args, logger, global_step)
-            evaluate(target_agent, target_eval_envs, args, logger, global_step)
+            evaluate(target_agent, target_eval_envs, args, logger, global_step+1)
             if args.evaluate:
                 break
 
