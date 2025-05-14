@@ -77,8 +77,7 @@ def main(args: Args):
         num_envs=args.num_envs,
         sim_backend=args.sim_backend,
         enable_shadow=True,
-        parallel_in_single_scene=parallel_in_single_scene,
-        robot_init_qpos_noise=0,
+        parallel_in_single_scene=parallel_in_single_scene
     )
     if args.robot_uids is not None:
         env_kwargs["robot_uids"] = tuple(args.robot_uids.split(","))
