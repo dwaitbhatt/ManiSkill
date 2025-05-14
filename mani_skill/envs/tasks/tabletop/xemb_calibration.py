@@ -139,7 +139,7 @@ class XembCalibrationEnv(BaseEnv):
         if not hasattr(self, 'goal_poses_tensor'):
             # Create a tensor of shape [num_goals, 3] with all goal positions
             self.goal_poses_tensor = torch.stack([
-                torch.tensor(goal.pose.p, device=self.device) 
+                goal.pose.p.clone().detach()[0]
                 for goal in self.goal_sites
             ]).squeeze(1)
         return self.goal_poses_tensor
