@@ -92,7 +92,7 @@ class AgentAligner:
         return data
 
 
-    def get_latent_generator_loss(self, target_data: ReplayBufferSample, global_step: int):
+    def get_latent_generator_loss(self, target_data: ReplayBufferSample, global_step: int) -> torch.Tensor:
         target_latent_obs = self.target_agent.encode_obs(target_data.obs)
         target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
         target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
@@ -136,6 +136,25 @@ class AgentAligner:
         return act_recon_loss
 
 
+    def get_action_cycle_consistency_loss(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
+        target_latent_obs = self.target_agent.encode_obs(target_data.obs)
+        target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
+
+        with torch.no_grad():
+            source_constr_act = self.source_agent.decode_action(target_latent_obs, target_latent_act)
+            source_latent_obs = self.source_agent.encode_obs(source_data.obs)
+            source_latent_constr_act = self.source_agent.encode_action(source_data.obs, source_constr_act)
+        
+        target_constr_act = self.target_agent.decode_action(source_latent_obs, source_latent_constr_act)
+
+        act_cycle_loss = F.mse_loss(target_constr_act, target_data.actions)
+
+        if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker["losses/action_cycle_consistency_loss"] = act_cycle_loss.item()
+
+        return act_cycle_loss
+
+
     def update(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
         source_data = self.pad_obs(source_data)
         target_data = self.pad_obs(target_data)
@@ -155,7 +174,9 @@ class AgentAligner:
         self.obs_encoder_optimizer.step()
 
         act_recon_loss = self.get_action_recon_loss(target_data, global_step)
-        act_recon_loss.backward()
+        act_cycle_loss = self.get_action_cycle_consistency_loss(source_data, target_data, global_step)
+        total_action_loss = act_recon_loss + act_cycle_loss
+        total_action_loss.backward()
 
         self.act_encoder_optimizer.step()
         self.act_decoder_optimizer.step()
