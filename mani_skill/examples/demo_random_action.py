@@ -1,6 +1,10 @@
 import gymnasium as gym
 import numpy as np
 import sapien
+import os
+import datetime
+import imageio
+from pathlib import Path
 
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.utils import gym_utils
@@ -51,6 +55,65 @@ class Args:
 
     seed: Annotated[Optional[Union[int, List[int]]], tyro.conf.arg(aliases=["-s"])] = None
     """Seed(s) for random actions and simulator. Can be a single integer or a list of integers. Default is None (no seeds)"""
+
+    save_dir: Annotated[Optional[str], tyro.conf.arg(aliases=["-d"])] = "saved_observations"
+    """Directory to save RGBD observations and camera poses when pressing the V key"""
+
+
+def save_observation(obs, save_dir: Path, args: Args):
+    save_dir.mkdir(exist_ok=True, parents=True)
+    
+    print(f"Saving RGBD observation to {save_dir}")
+    
+    # Save observation data if in visual mode
+    if args.obs_mode in ["rgb", "rgbd", "sensor_data"]:
+        # Save sensor data (RGB, depth, and camera parameters)
+        for cam_name, cam_data in obs["sensor_data"].items():
+            # Save RGB image
+            if "rgb" in cam_data:
+                rgb_img = cam_data["rgb"][0].cpu().numpy()  # Shape: (H, W, 3)
+                rgb_path = save_dir / f"{cam_name}_rgb.png"
+                imageio.imwrite(rgb_path, rgb_img)
+            
+            # Save depth image
+            if "depth" in cam_data:
+                depth_img = cam_data["depth"][0].cpu().numpy()  # Shape: (H, W, 1)
+                depth_path = save_dir / f"{cam_name}_depth.npy"
+                np.save(depth_path, depth_img)
+
+                depth_norm_path = save_dir / f"{cam_name}_depth_norm.png"
+                # Normalize depth for visualization
+                depth_norm = (depth_img / np.max(depth_img) * 255).astype(np.uint8)
+                depth_norm = np.repeat(depth_norm, 3, axis=2)
+                imageio.imwrite(depth_norm_path, depth_norm)
+
+            # Save camera parameters
+            if cam_name in obs["sensor_param"]:
+                cam_params = obs["sensor_param"][cam_name]
+                # Save extrinsic matrix
+                if "extrinsic_cv" in cam_params:
+                    np.save(
+                        save_dir / f"{cam_name}_extrinsic.npy", 
+                        cam_params["extrinsic_cv"][0].cpu().numpy()
+                    )
+                # Save intrinsic matrix
+                if "intrinsic_cv" in cam_params:
+                    np.save(
+                        save_dir / f"{cam_name}_intrinsic.npy", 
+                        cam_params["intrinsic_cv"][0].cpu().numpy()
+                    )
+                # Save camera-to-world matrix
+                if "cam2world_gl" in cam_params:
+                    np.save(
+                        save_dir / f"{cam_name}_cam2world.npy", 
+                        cam_params["cam2world_gl"][0].cpu().numpy()
+                    )
+        
+        print(f"Saved observation data to {save_dir}")
+    else:
+        print(f"Cannot save visual data: observation mode '{args.obs_mode}' doesn't provide image data")
+        print(f"Use 'rgbd' or 'sensor_data' observation mode to save images")
+
 
 def main(args: Args):
     np.set_printoptions(suppress=True, precision=3)
@@ -105,6 +168,16 @@ def main(args: Args):
         if isinstance(viewer, sapien.utils.Viewer):
             viewer.paused = args.pause
         env.render()
+    
+    # Create save directory for RGBD observations
+    if args.save_dir:
+        save_dir = Path(args.save_dir)
+        save_dir.mkdir(exist_ok=True, parents=True)
+    else:
+        save_dir = None
+    
+    observation_count = 0
+    
     while True:
         action = env.action_space.sample() if env.action_space is not None else None
         # action *= 0
@@ -116,6 +189,14 @@ def main(args: Args):
             print("info", info)
         if args.render_mode is not None:
             env.render()
+        
+        # Check for V key press to save observation
+        if args.render_mode == "human" and isinstance(viewer, sapien.utils.Viewer) and viewer.window.key_press("v"):
+            observation_count += 1
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            obs_dir = save_dir / f"observation_{timestamp}_{observation_count}"
+            save_observation(obs, obs_dir, args)
+        
         if args.render_mode is None or args.render_mode != "human":
             if (terminated | truncated).any():
                 break
