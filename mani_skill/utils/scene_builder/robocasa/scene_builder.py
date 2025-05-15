@@ -577,12 +577,10 @@ class RoboCasaSceneBuilder(SceneBuilder):
                     )
                 elif self.env.robot_uids == "reachy2":
                     self.env.agent.robot.set_qpos(
-                        self.env.agent.keyframes["rest"].qpos
+                        self.env.agent.keyframes["right_hand_out"].qpos
                     )
-                    xyz = self.env.agent.robot.pose.p
-                    self.env.agent.robot.set_pose(
-                        Pose.create_from_pq(p=xyz, q=self.env.agent.robot.pose.q)
-                    )
+                    reachy_pose = Pose.create_from_pq(p=[2.31, -3.27, 0], q=[0.70710678, 0., 0., -0.70710678])
+                    self.env.agent.robot.set_pose(reachy_pose)
 
     def get_fixture_cfgs(self, fixtures):
         """

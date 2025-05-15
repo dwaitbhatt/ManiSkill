@@ -1,13 +1,16 @@
 from copy import deepcopy
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
 import sapien
 import torch
 
+from mani_skill import PACKAGE_ASSET_DIR
 from mani_skill.envs.sapien_env import BaseEnv
+from mani_skill.envs.utils import randomization
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import sapien_utils
+from mani_skill.utils.building import actors
 from mani_skill.utils.registration import register_env
 from mani_skill.utils.scene_builder.robocasa.objects.kitchen_object_utils import (
     sample_kitchen_object,
@@ -18,6 +21,7 @@ from mani_skill.utils.scene_builder.robocasa.utils import scene_registry
 from mani_skill.utils.scene_builder.robocasa.utils.placement_samplers import (
     RandomizationError,
 )
+from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.pose import Pose
 from mani_skill.utils.structs.types import GPUMemoryConfig, SimConfig
 
@@ -26,7 +30,7 @@ from mani_skill.utils.structs.types import GPUMemoryConfig, SimConfig
     "RoboCasaKitchen-v1", max_episode_steps=100, asset_download_ids=["RoboCasa"]
 )
 class RoboCasaKitchenEnv(BaseEnv):
-    SUPPORTED_ROBOTS = ["fetch", "none"]
+    SUPPORTED_ROBOTS = ["fetch", "reachy2", "none"]
     SUPPORTED_REWARD_MODES = ["none"]
     """
     Initialized a Base Kitchen environment.
@@ -562,3 +566,189 @@ class RoboCasaKitchenEnv(BaseEnv):
             max_size=max_size,
             object_scale=object_scale,
         )
+
+
+@register_env(
+    "RoboCasaScrewBulb-v1", max_episode_steps=100, asset_download_ids=["RoboCasa"]
+)
+class RoboCasaScrewBulbEnv(RoboCasaKitchenEnv):
+    def __init__(self, *args, **kwargs):
+        self.cam_height = 1.608
+        self.cam_initial_pos = [3.315, -4.527, self.cam_height]
+        self.cam_lookat_target = [2.1, -3.72, 0.96]
+        super().__init__(*args, **kwargs)
+
+    def _build_bulb(self, color="orange"):
+        color_map = {
+            "blue":    [0.12156862745098039, 0.4666666666666667, 0.7058823529411765, 1],
+            "orange":  [1.0, 0.4980392156862745, 0.054901960784313725, 1],
+            "green":   [0.17254901960784313, 0.6274509803921569, 0.17254901960784313, 1],
+            "red":     [0.8392156862745098, 0.15294117647058825, 0.1568627450980392, 1],
+            "yellow":  [1.0, 0.8941176470588236, 0.0, 1],
+            "purple":  [0.5803921568627451, 0.403921568627451, 0.7411764705882353, 1],
+            "brown":   [0.5490196078431373, 0.33725490196078434, 0.29411764705882354, 1],
+            "pink":    [0.8901960784313725, 0.4666666666666667, 0.7607843137254902, 1],
+            "gray":    [0.4980392156862745, 0.4980392156862745, 0.4980392156862745, 1],
+            "olive":   [0.7372549019607844, 0.7411764705882353, 0.13333333333333333, 1],
+            "cyan":    [0.09019607843137255, 0.7450980392156863, 0.8117647058823529, 1],
+        }
+        self.bulb_model_path = str(PACKAGE_ASSET_DIR / "custom/bulb.obj")
+
+        self.bulb_builder = self.scene.create_actor_builder()
+        bulb_mat = sapien.render.RenderMaterial()
+        bulb_mat.set_base_color(color_map[color])
+        bulb_mat.metallic = 0.0
+        bulb_mat.roughness = 1.0
+        bulb_mat.specular = 1.0
+        self.bulb_builder.add_visual_from_file(
+            self.bulb_model_path,
+            scale = [0.04]*3,
+            material=bulb_mat
+        )
+        # self.bulb_builder.add_convex_collision_from_file(self.bulb_model_path)
+        self.bulb_builder.add_convex_collision_from_file(
+            filename=self.bulb_model_path,
+            scale=[0.04]*3,
+            density=5000
+        )
+        self.bulb_builder.initial_pose = sapien.Pose(p=[-0.0034, -0.0151, 0.0259], q=[0.9861, 0.1506, -0.0689, 0.0141])
+        bulb = self.bulb_builder.build(name=f"bulb_{color}")
+        return bulb
+
+    def _load_bulbs_tools(self):
+        self.bulbs: List[Actor] = []
+        self.bulbs.append(self._build_bulb(color="red"))
+        self.bulbs.append(self._build_bulb(color="green"))
+        self.bulbs.append(self._build_bulb(color="yellow"))
+
+        model_ids = ["035_power_drill", "043_phillips_screwdriver", "044_flat_screwdriver", "048_hammer", "042_adjustable_wrench"]
+        self.ycb_objects = []
+        for model_id in model_ids:
+            builder = actors.get_actor_builder(self.scene, id=f"ycb:{model_id}")
+            self.ycb_objects.append(builder.build(name=f"ycb_{model_id}"))
+
+    def _initialize_bulbs_tools(self, env_idx: torch.Tensor):
+        b = len(env_idx)
+
+        self.scene_x_offset = 2.4
+        self.scene_y_offset = -4.1
+        self.scene_z_offset = 0.95
+
+        # Define the overall area on the table for bulb placement
+        bulb_area_x_min = -0.3 + self.scene_x_offset
+        bulb_area_x_max = 0.1 + self.scene_x_offset
+        bulb_area_y_min = 0 + self.scene_y_offset
+        bulb_area_y_max = 0.3 + self.scene_y_offset
+        bulb_area_z = 0.02 + self.scene_z_offset  # height above the table
+        
+        # Now divide along x-axis instead of y-axis to spread bulbs horizontally
+        rectangle_width = (bulb_area_x_max - bulb_area_x_min) / 3
+        
+        # Each rectangle spans a limited x range but full y range
+        bulb_rectangles = [
+            [bulb_area_x_min, bulb_area_x_min + rectangle_width, bulb_area_y_min, bulb_area_y_max],  # Left rectangle
+            [bulb_area_x_min + rectangle_width, bulb_area_x_min + 2*rectangle_width, bulb_area_y_min, bulb_area_y_max],  # Middle rectangle
+            [bulb_area_x_min + 2*rectangle_width, bulb_area_x_max, bulb_area_y_min, bulb_area_y_max]  # Right rectangle
+        ]
+        
+        # For each bulb, generate positions within its designated rectangle for all environments
+        for bulb_idx, bulb in enumerate(self.bulbs):
+            rect = bulb_rectangles[bulb_idx]
+            
+            # Full x randomization within the rectangle
+            x = torch.rand(b, device=self.device) * (rect[1] - rect[0]) + rect[0]
+            
+            # Limited y randomization (constrained in y)
+            y_range = (rect[3] - rect[2]) * 0.3  # Reduce y randomization to 30%
+            y_center = (rect[2] + rect[3]) / 2
+            y = torch.rand(b, device=self.device) * y_range + (y_center - y_range/2)
+            
+            z = torch.full((b,), bulb_area_z, device=self.device)
+            
+            # Create position vectors for all environments
+            positions = torch.stack([x, y, z], dim=1)
+            
+            # Get random orientation (quaternion) around z-axis only
+            q = randomization.random_quaternions(b, device=self.device, lock_x=True, lock_y=True)
+
+            # Set new poses with randomized positions and z-axis rotations
+            bulb.set_pose(Pose.create_from_pq(positions, q))
+        
+        # Define a different area on the table for YCB objects
+        # Using the provided table xy half sizes (1.2, 0.6)
+        ycb_area_x_min = -0.5 + self.scene_x_offset  # Different area from bulbs
+        ycb_area_x_max = 0.5 + self.scene_x_offset   # Up to where bulbs start
+        ycb_area_y_min = -0.1 + self.scene_y_offset
+        ycb_area_y_max = 0 + self.scene_y_offset
+        ycb_area_z = 0.015 + self.scene_z_offset  # Height above the table
+        
+        # Determine the layout based on number of YCB objects
+        num_ycb_objects = len(self.ycb_objects)
+        
+        # Create a row-oriented layout (spread out in x, not y)
+        grid_rows = 1  # Single row
+        grid_cols = num_ycb_objects  # Each object gets its own column
+        
+        # Calculate the width of each column
+        col_width = (ycb_area_x_max - ycb_area_x_min) / grid_cols
+        
+        # Initialize YCB objects in their grid cells
+        for obj_idx, obj in enumerate(self.ycb_objects):
+            # Each object gets its own column
+            col = obj_idx
+            
+            # Calculate cell boundaries - limited width, full height
+            cell_x_min = ycb_area_x_min + col * col_width
+            cell_x_max = cell_x_min + col_width
+            cell_y_min = ycb_area_y_min
+            cell_y_max = ycb_area_y_max
+            
+            # Add some margin within each cell to avoid objects being at the edges
+            margin_x = 0.05  # Larger margin for x to ensure separation
+            margin_y = 0.01  # Small margin for y
+            cell_x_min += margin_x
+            cell_x_max -= margin_x
+            cell_y_min += margin_y
+            cell_y_max -= margin_y
+            
+            # Generate random positions within the cell for all environments
+            # Full x randomization within the column
+            x = torch.rand(b, device=self.device) * (cell_x_max - cell_x_min) + cell_x_min
+
+            # Limited y randomization (very constrained)
+            y_range = (cell_y_max - cell_y_min) * 0.3  # Reduce y randomization to 30%
+            y_center = (cell_y_min + cell_y_max) / 2
+            y = torch.rand(b, device=self.device) * y_range + (y_center - y_range/2)
+                        
+            z = torch.full((b,), ycb_area_z, device=self.device)
+            
+            # Create position vectors
+            positions = torch.stack([x, y, z], dim=1)
+            
+            # Randomize orientation around z-axis only (keep object upright)
+            q = randomization.random_quaternions(b, device=self.device, lock_x=True, lock_y=True)
+
+            # Set new poses
+            obj.set_pose(Pose.create_from_pq(positions, q))
+
+    def _load_scene(self, options: dict):
+        super()._load_scene(options)
+        self._load_bulbs_tools()
+        self.cam_mount = self.scene.create_actor_builder().build_kinematic("camera_mount")
+
+    def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
+        super()._initialize_episode(env_idx, options)
+        with torch.device(self.device):
+            self._initialize_bulbs_tools(env_idx)
+
+    @property
+    def _default_sensor_configs(self):
+        pose = sapien_utils.look_at([3.0, -7.5, 2.5], [3.0, 0.0, 1.0])
+        base_camera = CameraConfig("base_camera", pose, 128, 128, 
+                                   60 * np.pi / 180, 0.01, 100)
+        
+        closeup_pose = sapien_utils.look_at(self.cam_initial_pos, self.cam_lookat_target)
+        closeup_camera = CameraConfig("closeup_camera", pose=closeup_pose, width=256, height=256, 
+                                      fov=1.2, near=0.1, far=1e+03)
+
+        return [base_camera, closeup_camera]

@@ -1,1 +1,1 @@
-from .kitchen import RoboCasaKitchenEnv
+from .kitchen import RoboCasaKitchenEnv, RoboCasaScrewBulbEnv
