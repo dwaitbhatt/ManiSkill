@@ -1,0 +1,139 @@
+{
+  "episodes": [
+    {
+      "episode_id": 0,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 449,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 1,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 750,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 2,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 760,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 3,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 730,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 4,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 690,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 5,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 727,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 6,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 724,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 7,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 692,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 8,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 745,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 9,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 725,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    },
+    {
+      "episode_id": 10,
+      "episode_seed": 2022,
+      "control_mode": "pd_joint_vel",
+      "elapsed_steps": 742,
+      "reset_kwargs": {
+        "options": {}
+      },
+      "success": true
+    }
+  ],
+  "env_info": {
+    "env_id": "XembCalibration-v1",
+    "env_kwargs": {
+      "obs_mode": "state_dict",
+      "control_mode": "pd_joint_vel",
+      "render_mode": "rgb_array",
+      "robot_uids": "xarm6_robotiq",
+      "reward_mode": null,
+      "sensor_configs": {
+        "shader_pack": "default"
+      },
+      "human_render_camera_configs": {
+        "shader_pack": "default"
+      },
+      "viewer_camera_configs": {
+        "shader_pack": "default"
+      },
+      "sim_backend": "cpu"
+    },
+    "max_episode_steps": 300
+  },
+  "commit_info": {
+    "commit_id": "77ed13029c18fc44f86b300f2dce0788f6aa04ae",
+    "branch": "xemb-transfer"
+  }
+}

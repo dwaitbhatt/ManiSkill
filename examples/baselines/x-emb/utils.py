@@ -169,9 +169,9 @@ class Args:
     # Alignment specific parameters
     source_trained_model_path: Optional[str] = "examples/baselines/x-emb/source_panda_final_ckpt.pt"
     """the path to the source trained model"""
-    alignment_source_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/panda_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
+    alignment_source_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/merged/panda_calibration_noisy_hybrid_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
     """the path to the alignment source trajectories"""
-    alignment_target_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/xarm6_calibration_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
+    alignment_target_traj_path: Optional[str] = "demos/XembCalibration-v1/motionplanning/merged/xarm6_calibration_noisy_hybrid_traj_n10.state_dict.pd_joint_vel.physx_cpu.h5"
     """the path to the alignment target trajectories"""
     alignment_samples: int = 100_000
     """the number of samples to run alignment on"""

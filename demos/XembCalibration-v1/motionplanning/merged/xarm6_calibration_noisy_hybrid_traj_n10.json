@@ -1,0 +1,152 @@
+{
+  "episodes": [
+    {
+      "episode_id": 0,
+      "episode_seed": 69,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 449,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 69
+      },
+      "success": true
+    },
+    {
+      "episode_id": 1,
+      "episode_seed": 69,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 461,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 69
+      },
+      "success": true
+    },
+    {
+      "episode_id": 2,
+      "episode_seed": 91,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 470,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 91
+      },
+      "success": true
+    },
+    {
+      "episode_id": 3,
+      "episode_seed": 106,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 463,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 106
+      },
+      "success": true
+    },
+    {
+      "episode_id": 4,
+      "episode_seed": 159,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 433,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 159
+      },
+      "success": true
+    },
+    {
+      "episode_id": 5,
+      "episode_seed": 171,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 449,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 171
+      },
+      "success": true
+    },
+    {
+      "episode_id": 6,
+      "episode_seed": 185,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 452,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 185
+      },
+      "success": true
+    },
+    {
+      "episode_id": 7,
+      "episode_seed": 334,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 451,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 334
+      },
+      "success": true
+    },
+    {
+      "episode_id": 8,
+      "episode_seed": 634,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 465,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 634
+      },
+      "success": true
+    },
+    {
+      "episode_id": 9,
+      "episode_seed": 635,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 459,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 635
+      },
+      "success": true
+    },
+    {
+      "episode_id": 10,
+      "episode_seed": 790,
+      "control_mode": "pd_joint_pos",
+      "elapsed_steps": 460,
+      "reset_kwargs": {
+        "options": {},
+        "seed": 790
+      },
+      "success": true
+    }
+  ],
+  "env_info": {
+    "env_id": "XembCalibration-v1",
+    "env_kwargs": {
+      "obs_mode": "none",
+      "control_mode": "pd_joint_pos",
+      "render_mode": "rgb_array",
+      "robot_uids": "xarm6_robotiq",
+      "reward_mode": "dense",
+      "sensor_configs": {
+        "shader_pack": "default"
+      },
+      "human_render_camera_configs": {
+        "shader_pack": "default"
+      },
+      "viewer_camera_configs": {
+        "shader_pack": "default"
+      },
+      "sim_backend": "auto"
+    },
+    "max_episode_steps": 300
+  },
+  "commit_info": {
+    "commit_id": "77ed13029c18fc44f86b300f2dce0788f6aa04ae",
+    "branch": "xemb-transfer"
+  },
+  "source_type": "motionplanning",
+  "source_desc": "official motion planning solution from ManiSkill contributors"
+}
