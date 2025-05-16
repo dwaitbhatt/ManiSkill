@@ -67,7 +67,7 @@ class XArm6RobotiqMotionPlanningSolver(PandaArmMotionPlanningSolver):
         return obs, reward, terminated, truncated, info
     
     def move_to_pose_with_RRTStar(
-        self, pose: sapien.Pose, dry_run: bool = False, refine_steps: int = 0
+        self, pose: sapien.Pose, dry_run: bool = False, refine_steps: int = 0, eps: float = 0.0
     ):
         pose = to_sapien_pose(pose)
         if self.grasp_pose_visual is not None:
@@ -88,6 +88,8 @@ class XArm6RobotiqMotionPlanningSolver(PandaArmMotionPlanningSolver):
             self.render_wait()
             return -1
         self.render_wait()
+        if eps > 0:
+            result["position"] += np.clip(np.random.normal(0, eps, result["position"].shape), -eps, eps)
         if dry_run:
             return result
         return self.follow_path(result, refine_steps=refine_steps)

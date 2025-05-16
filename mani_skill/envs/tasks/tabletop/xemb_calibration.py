@@ -22,7 +22,7 @@ class XembCalibrationEnv(BaseEnv):
     A calibration task where the objective is to reach each goal position in order of x, y, z and go back to the original position.
 
     **Success Conditions:**
-    - If the tcp reaches within `goal_thresh` (default 0.04m) euclidean distance of the each goal position in the right order, the task is considered successful.
+    - If the tcp reaches within `goal_thresh` (default 0.05m) euclidean distance of the each goal position in the right order, the task is considered successful.
     - the robot is static at the end of the episode (q velocity < 0.2)
     """
 
@@ -37,9 +37,8 @@ class XembCalibrationEnv(BaseEnv):
         "xarm6_pandagripper"
     ]
     agent: Union[Panda, Fetch, XArm6Robotiq, XArm6AllegroLeft, XArm6AllegroRight, FloatingRobotiq2F85Gripper, XArm6PandaGripper]
-    goal_thresh = 0.04
-    calibration_delta = 0.1
-    axes = ['x', 'y', 'z']
+    goal_thresh = 0.05
+    calibration_deltas = {"+x": 0.15, "-x": -0.25, "+y": 0.3, "-y": -0.3, "+z": 0.3, "-z": -0.15}
 
     def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
         self.robot_init_qpos_noise = robot_init_qpos_noise
@@ -65,30 +64,47 @@ class XembCalibrationEnv(BaseEnv):
         self.table_scene.build()
 
         self.goal_positions = {}
-        for i, axis in enumerate(self.axes):
-            positions = [np.array([0, 0, 0.2]) for _ in range(2)]
-            positions[0][i] += self.calibration_delta
-            positions[1][i] -= self.calibration_delta
-            self.goal_positions[axis] = positions
+        positions = np.array([[0, 0, 0.2]] * 6)
+        for i, (axis, delta) in enumerate(self.calibration_deltas.items()):
+            if axis[1] == 'x':
+                j = 0
+            elif axis[1] == 'y':
+                j = 1
+            elif axis[1] == 'z':
+                j = 2
+
+            positions[i][j] += delta
+            self.goal_positions[axis] = positions[i]
 
         self.goal_sites = []
-        for axis in self.axes:
-            for i, pos in enumerate(self.goal_positions[axis]):
-                goal_site = actors.build_sphere(
-                    self.scene,
-                    radius=self.goal_thresh,
-                    color=[0, 1, 0, 0.5],
-                    name=f"goal_site_{axis}_{i+1}",
-                    body_type="kinematic",
-                    add_collision=False,
+        self.goal_sites_in_order = []
+
+        central_goal_site = actors.build_sphere(
+            self.scene,
+            radius=self.goal_thresh,
+            color=[0, 1, 0, 0.5],
+            name="central_goal_site",
+            body_type="kinematic",
+            add_collision=False,
+            initial_pose=sapien.Pose(p=[0, 0, 0.2]),
+        )
+        self.goal_sites.append(central_goal_site)
+
+        for axis, pos in self.goal_positions.items():
+            goal_site = actors.build_sphere(
+                self.scene,
+                radius=self.goal_thresh,
+                color=[0, 1, 0, 0.5],
+                name=f"goal_site_{axis}",
+                body_type="kinematic",
+                add_collision=False,
                     initial_pose=sapien.Pose(p=pos),
                 )
-                self.goal_sites.append(goal_site)
+            self.goal_sites.append(goal_site)
+            self.goal_sites_in_order.append(goal_site)
+            self.goal_sites_in_order.append(central_goal_site)
 
         self._hidden_objects.extend(self.goal_sites)
-        # Dictionary to store goal indexing
-        self.goal_name_to_idx = {site: i for i, site in enumerate(self.goal_sites)}
-        # This will be initialized properly in _initialize_episode
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
@@ -96,7 +112,7 @@ class XembCalibrationEnv(BaseEnv):
             # Initialize tensor to track which goals have been reached
             # Shape: [n_envs, n_goals]
             self.reached_goal_tracker = torch.zeros(
-                (self.num_envs, len(self.goal_sites)), 
+                (self.num_envs, len(self.goal_sites_in_order)), 
                 dtype=torch.bool, 
                 device=self.device
             )
@@ -140,7 +156,7 @@ class XembCalibrationEnv(BaseEnv):
             # Create a tensor of shape [num_goals, 3] with all goal positions
             self.goal_poses_tensor = torch.stack([
                 goal.pose.p.clone().detach()[0]
-                for goal in self.goal_sites
+                for goal in self.goal_sites_in_order
             ]).squeeze(1)
         return self.goal_poses_tensor
 
@@ -153,7 +169,7 @@ class XembCalibrationEnv(BaseEnv):
         rewards = self.stage_rewards.clone()
         
         # Create masks for different conditions
-        all_goals_reached_mask = self.current_goal_idx >= len(self.goal_sites)
+        all_goals_reached_mask = self.current_goal_idx >= len(self.goal_sites_in_order)
         goals_in_progress_mask = ~all_goals_reached_mask
         
         # ===== PROCESS ENVIRONMENTS WHERE ALL GOALS ARE REACHED =====

@@ -36,6 +36,7 @@ def parse_args(args=None):
     parser.add_argument("--shader", default="default", type=str, help="Change shader used for rendering. Default is 'default' which is very fast. Can also be 'rt' for ray tracing and generating photo-realistic renders. Can also be 'rt-fast' for a faster but lower quality ray-traced renderer")
     parser.add_argument("--record-dir", type=str, default="demos", help="where to save the recorded trajectories")
     parser.add_argument("--num-procs", type=int, default=1, help="Number of processes to use to help parallelize the trajectory replay process. This uses CPU multiprocessing and only works with the CPU simulation backend at the moment.")
+    parser.add_argument("--eps", type=float, default=0.0, help="Add noise to the motion planning trajectories. Can be used to generate diverse (though suboptimal) data.")
     return parser.parse_args()
 
 def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
@@ -82,7 +83,10 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
     passed = 0
     while True:
         try:
-            res = solve(env, seed=seed, debug=False, vis=True if args.vis else False)
+            solve_kwargs = dict(seed=seed, debug=False, vis=True if args.vis else False)
+            if args.eps > 0:
+                solve_kwargs["eps"] = args.eps
+            res = solve(env, **solve_kwargs)
         except Exception as e:
             print(f"Cannot find valid solution because of an error in motion planning solution: {e}")
             res = -1

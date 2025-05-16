@@ -8,7 +8,7 @@ from mani_skill.examples.motionplanning.panda.utils import (
     compute_grasp_info_by_obb, get_actor_obb)
 from mani_skill.utils.structs import Pose
 
-def solve(env: XembCalibrationEnv, seed=None, debug=False, vis=False):
+def solve(env: XembCalibrationEnv, seed=None, debug=False, vis=False, eps=0.0):
     env.reset(seed=seed)
 
     if env.unwrapped.robot_uids == "xarm6_robotiq":
@@ -27,30 +27,30 @@ def solve(env: XembCalibrationEnv, seed=None, debug=False, vis=False):
     )
     env = env.unwrapped
 
-    delta = 0.1
     original_p = env.agent.tcp.pose.p.numpy()
     original_q = env.agent.tcp.pose.q.numpy()
 
     # -------------------------------------------------------------------------- #
     # Move in each axis and go back
     # -------------------------------------------------------------------------- #
-    axes = ['x', 'y', 'z']
-    for i, axis in enumerate(axes):
-        # Create displacement vector for current axis
-        displacement = np.zeros(3, dtype=np.float32)
-        displacement[i] = delta
-        
-        # Move forward
-        reach_pose = Pose.create_from_pq(p=original_p + displacement, q=original_q)
-        planner.move_to_pose_with_screw(reach_pose)
-        
-        # Move backward (twice the distance)
-        reach_pose = Pose.create_from_pq(p=original_p - displacement, q=original_q)
-        planner.move_to_pose_with_screw(reach_pose)
+    for axis, delta in env.calibration_deltas.items():
+        delta_pos = np.zeros(3, dtype=np.float32)
+        if axis[1] == 'x':
+            j = 0
+        elif axis[1] == 'y':
+            j = 1
+        elif axis[1] == 'z':
+            j = 2
+
+        delta_pos[j] = delta
+
+        # Move to goal position
+        reach_pose = Pose.create_from_pq(p=original_p + delta_pos, q=original_q)
+        planner.move_to_pose_with_screw(reach_pose, eps=eps)
         
         # Return to middle position
         reach_pose = Pose.create_from_pq(p=original_p, q=original_q)
-        planner.move_to_pose_with_screw(reach_pose)
+        planner.move_to_pose_with_screw(reach_pose, eps=eps)
 
     # -------------------------------------------------------------------------- #
     # Close gripper 
