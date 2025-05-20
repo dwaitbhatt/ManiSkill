@@ -43,12 +43,12 @@
 python -m mani_skill.examples.motionplanning.xarm6.run --env-id PlaceCube-v1 --traj-name="trajectory" -n 100 --only-count-success
 
 python -m mani_skill.trajectory.replay_trajectory \
-  --traj-path demos/PlaceCube-v1/motionplanning/trajectory.h5 \
+  --traj-path demos/PickCube-v1/motionplanning/20250519_193425.h5 \
   --use-first-env-state -c pd_joint_vel -o rgbd \
   --save-traj --num-envs 10 -b cpu
 
 python bc_rgbd.py --env-id "PlaceCube-v1" \
-  --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.cpu.h5 \
+  --demo-path demos/PickCube-v1/motionplanning/20250519_193425.rgbd.pd_joint_vel.physx_cpu.h5 \
   --control-mode "pd_joint_vel" --sim-backend "cpu" --max-episode-steps 150 \
   --total-iters 1000000 --batch-size 128 --num_eval_envs 1 \
   --track --wandb_project_name "maniskill_experiments" --wandb_entity "ucsd_erl"

@@ -40,6 +40,7 @@ imgui.ini
 *logs/
 *outputs/
 *venv*/
+*saved_observations/
 
 # benchmarking
 /benchmark_results

@@ -46,6 +46,8 @@ class Args:
 
     env_id: str = "PegInsertionSide-v0"
     """the id of the environment"""
+    robot: str = "panda"
+    """the robot to use for the environment"""
     demo_path: str = "data/ms2_official_demos/rigid_body/PegInsertionSide-v0/trajectory.state.pd_ee_delta_pose.h5"
     """the path of demo dataset (pkl or h5)"""
     num_demos: Optional[int] = None
@@ -125,6 +127,8 @@ def flatten_state_dict_with_space(state_dict: dict) -> np.ndarray:
                 raise AssertionError(
                     "The dimension of {} should not be more than 2.".format(key)
                 )
+            if value.ndim == 1:
+                value = value.reshape(-1, 1)
             state = value
         else:
             raise TypeError("Unsupported type: {}".format(type(value)))
@@ -356,6 +360,12 @@ if __name__ == "__main__":
                 control_mode == args.control_mode
             ), f"Control mode mismatched. Dataset has control mode {control_mode}, but args has control mode {args.control_mode}"
 
+            if "robot_uids" in demo_info["env_info"]["env_kwargs"]:
+                robot_uid = demo_info["env_info"]["env_kwargs"]["robot_uids"]
+                assert args.robot == robot_uid, f"Robot mismatched. Dataset has robot {robot_uid}, but args has robot {args.robot}"
+            else:
+                raise Exception("Robot uid not found in json")
+            
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -366,6 +376,7 @@ if __name__ == "__main__":
 
     # env setup
     env_kwargs = dict(
+        robot_uids=args.robot,
         control_mode=args.control_mode,
         reward_mode="sparse",
         obs_mode="rgbd",
