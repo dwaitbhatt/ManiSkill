@@ -8,6 +8,7 @@ from mani_skill.utils.io_utils import load_json
 from tqdm import tqdm
 from replay_buffer import ReplayBufferSample
 import random
+from mani_skill.envs.tasks.tabletop.xemb_calibration import XembCalibrationEnv
 
 
 @dataclass
@@ -63,7 +64,7 @@ class AlignedCalibrationTrajDataset:
     and organizes them by goal index for efficient sampling.
     """
     def __init__(self, source_path: str, target_path: str, device: torch.device, 
-                 load_count: int = -1, normalize_states: bool = False):
+                 load_count: int = -1, normalize_states: bool = False, num_goals: int = 7):
         """
         Args:
             source_path: Path to source dataset h5 file
@@ -71,6 +72,7 @@ class AlignedCalibrationTrajDataset:
             device: Device to load tensors on
             load_count: Number of episodes to load (-1 for all)
             normalize_states: Whether to normalize observation states
+            num_goals: Number of subgoals for the calibration task
         """
         self.device = device
         
@@ -81,14 +83,16 @@ class AlignedCalibrationTrajDataset:
         # Group timesteps by goal index for efficient sampling
         self.source_by_goal = self._group_by_goal_idx(self.source_episodes)
         self.target_by_goal = self._group_by_goal_idx(self.target_episodes)
+
+        self.num_goal_inds = num_goals + 1
         
-        # Verify that all goal indices (0-6) are available in both datasets
-        for goal_idx in range(7):  # 0 to 6
+        # Verify that all goal indices are available in both datasets
+        for goal_idx in range(self.num_goal_inds):
             assert goal_idx in self.source_by_goal, f"Goal index {goal_idx} not found in source dataset"
             assert goal_idx in self.target_by_goal, f"Goal index {goal_idx} not found in target dataset"
         
         print(f"Loaded {len(self.source_episodes)} source episodes and {len(self.target_episodes)} target episodes")
-        for goal_idx in range(7):
+        for goal_idx in range(self.num_goal_inds):
             print(f"Goal {goal_idx}: {len(self.source_by_goal[goal_idx])} source timesteps, "
                   f"{len(self.target_by_goal[goal_idx])} target timesteps")
     
@@ -219,13 +223,13 @@ class AlignedCalibrationTrajDataset:
         # Track relative positions within each goal index group
         self._source_relative_positions = {}
         self._source_relative_counter = {}  # Counter for each goal index
-        for goal_idx in range(7):  # 0 to 6
+        for goal_idx in range(self.num_goal_inds):
             self._source_relative_positions[f"goal_{goal_idx}"] = {}
         
         for ep_idx, episode in enumerate(self.source_episodes):
             current_goal_idx = episode["current_goal_idx"]
             num_steps = len(current_goal_idx)
-            for goal_idx in range(7):
+            for goal_idx in range(self.num_goal_inds):
                 self._source_relative_counter[goal_idx] = 0
 
             ep_indices = [ep_idx] * num_steps
@@ -269,13 +273,13 @@ class AlignedCalibrationTrajDataset:
         # Track relative positions within each goal index group
         self._target_relative_positions = {}
         self._target_relative_counter = {}  # Counter for each goal index
-        for goal_idx in range(7):  # 0 to 6
+        for goal_idx in range(self.num_goal_inds):
             self._target_relative_positions[f"goal_{goal_idx}"] = {}
         
         for ep_idx, episode in enumerate(self.target_episodes):
             current_goal_idx = episode["current_goal_idx"]
             num_steps = len(current_goal_idx)
-            for goal_idx in range(7):
+            for goal_idx in range(self.num_goal_inds):
                 self._target_relative_counter[goal_idx] = 0
 
             ep_indices = [ep_idx] * num_steps
@@ -344,7 +348,7 @@ class AlignedCalibrationTrajDataset:
         """
         # If goal_idx is not provided, randomly select one
         if goal_idx is None:
-            goal_idx = np.random.randint(0, 7)  # 0 to 6
+            goal_idx = np.random.randint(0, self.num_goal_inds)
         
         # Prepare index tensors if not already done
         if not hasattr(self, '_source_goal_indices'):
@@ -429,13 +433,13 @@ class AlignedCalibrationTrajDataLoader:
         """Yield batches of data with matching goal indices"""
         # If shuffling, create a random order of goal indices
         if self.shuffle_goals:
-            goal_indices = np.random.permutation(7)  # 0 to 6
+            goal_indices = np.random.permutation(self.dataset.num_goal_inds)
         else:
-            goal_indices = np.arange(7)
+            goal_indices = np.arange(self.dataset.num_goal_inds)
         
         # Cycle through goal indices for the requested number of steps
         for i in range(self.steps_per_epoch):
-            goal_idx = goal_indices[i % 7]
+            goal_idx = goal_indices[i % self.dataset.num_goal_inds]
             yield self.dataset.sample_batch(self.batch_size, goal_idx)
     
     def __len__(self):
@@ -443,7 +447,6 @@ class AlignedCalibrationTrajDataLoader:
         return self.steps_per_epoch
 
 
-# Helper function to create a dataloader
 def create_aligned_calibration_traj_dataloader(
     source_path: str, 
     target_path: str, 
@@ -470,12 +473,15 @@ def create_aligned_calibration_traj_dataloader(
     Returns:
         GoalAlignedDataLoader instance
     """
+    env = XembCalibrationEnv()
+    env.reset()
     dataset = AlignedCalibrationTrajDataset(
         source_path=source_path,
         target_path=target_path,
         device=device,
         load_count=load_count,
-        normalize_states=normalize_states
+        normalize_states=normalize_states,
+        num_goals=env.num_goals
     )
     
     dataloader = AlignedCalibrationTrajDataLoader(

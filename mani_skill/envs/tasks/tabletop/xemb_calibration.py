@@ -103,6 +103,7 @@ class XembCalibrationEnv(BaseEnv):
             self.goal_sites.append(goal_site)
             self.goal_sites_in_order.append(goal_site)
             self.goal_sites_in_order.append(central_goal_site)
+        self.num_goals = len(self.goal_sites_in_order)
 
         self._hidden_objects.extend(self.goal_sites)
 
@@ -112,7 +113,7 @@ class XembCalibrationEnv(BaseEnv):
             # Initialize tensor to track which goals have been reached
             # Shape: [n_envs, n_goals]
             self.reached_goal_tracker = torch.zeros(
-                (self.num_envs, len(self.goal_sites_in_order)), 
+                (self.num_envs, self.num_goals), 
                 dtype=torch.bool, 
                 device=self.device
             )
@@ -169,7 +170,7 @@ class XembCalibrationEnv(BaseEnv):
         rewards = self.stage_rewards.clone()
         
         # Create masks for different conditions
-        all_goals_reached_mask = self.current_goal_idx >= len(self.goal_sites_in_order)
+        all_goals_reached_mask = self.current_goal_idx >= self.num_goals
         goals_in_progress_mask = ~all_goals_reached_mask
         
         # ===== PROCESS ENVIRONMENTS WHERE ALL GOALS ARE REACHED =====
