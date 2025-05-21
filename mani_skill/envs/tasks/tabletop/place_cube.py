@@ -82,8 +82,10 @@ class PlaceCubeEnv(BaseEnv):
             CameraConfig(
                 "real_camera",
                 pose=real_pose,
-                width=640,
-                height=480,
+                # width=640,
+                # height=480,
+                width=128,
+                height=128,
                 fov=np.pi * 0.4,
                 near=0.01,
                 far=100,

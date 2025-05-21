@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 from behavior_cloning.evaluate import evaluate
 from behavior_cloning.make_env import make_eval_envs
+from mani_skill.trajectory.dataset import ManiSkillMemEffDataset
 
 
 @dataclass
@@ -85,6 +86,8 @@ class Args:
     """the number of workers to use for loading the training data in the torch dataloader"""
     control_mode: str = "pd_joint_delta_pos"
     """the control mode to use for the evaluation environments. Must match the control mode of the demonstration dataset."""
+    memory_efficient: bool = False
+    """if toggled, the dataset will be loaded in a memory efficient manner"""
 
     # additional tags/configs for logging purposes to wandb and shared comparisons with other algorithms
     demo_type: Optional[str] = None
@@ -420,11 +423,18 @@ if __name__ == "__main__":
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    ds = ManiSkillDataset(
-        args.demo_path,
-        device=device,
-        load_count=args.num_demos,
-    )
+    if args.memory_efficient:
+        ds = ManiSkillMemEffDataset(
+            args.demo_path,
+            device=device,
+            load_count=args.num_demos,
+        )
+    else:
+        ds = ManiSkillDataset(
+            args.demo_path,
+            device=device,
+            load_count=args.num_demos,
+        )
 
     obs, _ = envs.reset(seed=args.seed)
 
@@ -492,5 +502,7 @@ if __name__ == "__main__":
         if args.save_freq is not None and iteration % args.save_freq == 0:
             save_ckpt(run_name, str(iteration))
     envs.close()
+    if args.memory_efficient:
+        ds.close()
     if args.track:
         wandb.finish()
