@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: db-maniskill-job-xarm6-bcrgbd
+  name: db-maniskill-job-xarm6-bcrgbd-memeff
 spec:
   template:
     spec:
@@ -69,10 +69,10 @@ spec:
             --use-first-env-state -c pd_joint_vel -o rgbd \
             --save-traj --num-envs 32 -b cpu && \
           export CUBLAS_WORKSPACE_CONFIG=:4096:8 && \
-          python examples/baselines/bc/bc_rgbd.py --env-id \"PlaceCube-v1\" \
-            --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.cpu.h5 \
+          python examples/baselines/bc/bc_rgbd.py --env-id \"PlaceCube-v1\" --robot \"xarm6_robotiq\" \
+            --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.physx_cpu.h5 \
             --control-mode \"pd_joint_vel\" --sim-backend \"cpu\" --max-episode-steps 150 \
-            --total-iters 1000000 --batch-size 256 --num_eval_envs 4 \
+            --total-iters 1000000 --batch-size 128 --num_eval_envs 4 --memory-efficient \
             --track --wandb_project_name \"maniskill_experiments\" --wandb_entity \"ucsd_erl\"
           "
         ]
@@ -88,11 +88,11 @@ spec:
         resources:
           limits:
             nvidia.com/gpu: "1"
-            memory: "156G"
+            memory: "72G"
             cpu: "32"
           requests:
             nvidia.com/gpu: "1"
-            memory: "128G"
+            memory: "64G"
             cpu: "24"
       affinity:
         # nodeAffinity:
