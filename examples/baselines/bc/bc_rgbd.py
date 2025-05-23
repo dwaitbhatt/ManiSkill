@@ -42,6 +42,8 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = None
     """the entity (team) of wandb's project"""
+    wandb_video_freq: int = 2
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
@@ -393,6 +395,7 @@ if __name__ == "__main__":
         args.sim_backend,
         env_kwargs,
         video_dir=f"runs/{run_name}/videos" if args.capture_video else None,
+        wandb_video_freq=args.wandb_video_freq,
         wrappers=[FlattenRGBDObservationWrapper],
     )
 
