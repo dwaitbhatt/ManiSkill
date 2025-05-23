@@ -464,7 +464,10 @@ class ManiSkillMemEffDataset(TorchDataset):
         for f in self.files_to_close:
             fname = f.filename
             f.close()
-            os.remove(fname)
+            try:
+                os.remove(fname)
+            except:
+                pass
 
 
     def __del__(self):

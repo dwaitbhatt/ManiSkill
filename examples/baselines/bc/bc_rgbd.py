@@ -38,10 +38,12 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     track: bool = False
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "ManiSkill"
+    wandb_project_name: str = "maniskill_experiments"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: Optional[str] = "ucsd_erl"
     """the entity (team) of wandb's project"""
+    wandb_video_freq: int = 2
+    """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
@@ -387,14 +389,6 @@ if __name__ == "__main__":
     )
     if args.max_episode_steps is not None:
         env_kwargs["max_episode_steps"] = args.max_episode_steps
-    envs = make_eval_envs(
-        args.env_id,
-        args.num_eval_envs,
-        args.sim_backend,
-        env_kwargs,
-        video_dir=f"runs/{run_name}/videos" if args.capture_video else None,
-        wrappers=[FlattenRGBDObservationWrapper],
-    )
 
     if args.track:
         import wandb
@@ -421,6 +415,16 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s"
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
+
+    video_dir=f"runs/{run_name}/videos" if args.capture_video else None
+    envs = make_eval_envs(
+        args.env_id,
+        args.num_eval_envs,
+        args.sim_backend,
+        env_kwargs,
+        video_dir=video_dir,
+        wrappers=[FlattenRGBDObservationWrapper],
     )
 
     if args.memory_efficient:
@@ -450,6 +454,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(actor.parameters(), lr=args.lr)
     best_eval_metrics = defaultdict(float)
 
+    eval_count = 0
     for iteration, batch in enumerate(data_loader):
         log_dict = {}
 
@@ -498,6 +503,11 @@ if __name__ == "__main__":
                     print(
                         f"New best {k}_rate: {eval_metrics[k]:.4f}. Saving checkpoint."
                     )
+
+            if eval_count % args.wandb_video_freq == 0:
+                video_files = sorted([f for f in os.listdir(video_dir) if f.endswith('.mp4')])
+                video_name = video_files[-1] if video_files else None
+                wandb.log({"video": wandb.Video(f"{video_dir}/{video_name}", fps=30)})
 
         if args.save_freq is not None and iteration % args.save_freq == 0:
             save_ckpt(run_name, str(iteration))
