@@ -7,7 +7,7 @@ spec:
     spec:
       containers:
       - name: gpu-container
-        image: dhbhatt/maniskill-experiments:v4.1_tdmpc
+        image: dhbhatt/maniskill-experiments:latest
         command: ["/bin/bash", "-c"]
         args: [
           # "git pull && \
@@ -67,12 +67,13 @@ spec:
           python -m mani_skill.trajectory.replay_trajectory \
             --traj-path demos/PlaceCube-v1/motionplanning/trajectory.h5 \
             --use-first-env-state -c pd_joint_vel -o rgbd \
-            --save-traj --num-envs 32 -b cpu && \
+            --save-traj --num-envs 8 -b cpu && \
           export CUBLAS_WORKSPACE_CONFIG=:4096:8 && \
           python examples/baselines/bc/bc_rgbd.py --env-id \"PlaceCube-v1\" --robot \"xarm6_robotiq\" \
             --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.physx_cpu.h5 \
-            --control-mode \"pd_joint_vel\" --sim-backend \"cpu\" --max-episode-steps 150 \
-            --total-iters 1000000 --batch-size 128 --num_eval_envs 4 --memory-efficient \
+            --control-mode \"pd_joint_vel\" --sim-backend \"gpu\" \
+            --max-episode-steps 150 --total-iters 1000000 --batch-size 128 \
+            --num_eval_envs 8 --num-eval-episodes 8 --memory-efficient \
             --track --wandb_project_name \"maniskill_experiments\" --wandb_entity \"ucsd_erl\"
           "
         ]

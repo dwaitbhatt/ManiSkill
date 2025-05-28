@@ -348,6 +348,7 @@ if __name__ == "__main__":
         run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
+        args.exp_name = f"{os.path.basename(__file__)[: -len('.py')]}__{args.exp_name}"
 
     if args.demo_path.endswith(".h5"):
         import json
@@ -407,7 +408,7 @@ if __name__ == "__main__":
             config=config,
             name=run_name,
             save_code=True,
-            group="BehaviorCloning",
+            group=f"{args.env_id}_{args.robot}_{args.exp_name}",
             tags=["behavior_cloning"],
         )
     writer = SummaryWriter(f"runs/{run_name}")
