@@ -573,9 +573,12 @@ class RoboCasaKitchenEnv(BaseEnv):
 )
 class RoboCasaScrewBulbEnv(RoboCasaKitchenEnv):
     def __init__(self, *args, **kwargs):
+        self.cam_theta = 0.0
+        self.cam_speed = 0.01
         self.cam_height = 1.608
         self.cam_initial_pos = [3.315, -4.527, self.cam_height]
         self.cam_lookat_target = [2.1, -3.72, 0.96]
+        self.cam_radius = np.linalg.norm(np.array(self.cam_initial_pos[:2]) - np.array(self.cam_lookat_target[:2]))
         super().__init__(*args, **kwargs)
 
     def _build_bulb(self, color="orange"):
@@ -751,4 +754,22 @@ class RoboCasaScrewBulbEnv(RoboCasaKitchenEnv):
         closeup_camera = CameraConfig("closeup_camera", pose=closeup_pose, width=256, height=256, 
                                       fov=1.2, near=0.1, far=1e+03)
 
-        return [base_camera, closeup_camera]
+        moving_camera = CameraConfig(
+                            "moving_camera", pose=sapien.Pose(), width=256, height=256, 
+                            fov=1.2, near=0.01, far=100, 
+                            mount=self.cam_mount
+                        )
+        return [base_camera, closeup_camera, moving_camera]
+     
+    def _before_simulation_step(self):
+        super()._before_simulation_step()
+
+        # Move the camera mount along a circle in the xy plane while looking at the same point throughout
+        new_p = np.array([
+            self.cam_radius * np.cos(self.cam_theta),
+            self.cam_radius * np.sin(self.cam_theta),
+            self.cam_height
+        ])
+        new_p[:2] += self.cam_lookat_target[:2]
+        self.cam_mount.set_pose(sapien_utils.look_at(new_p, self.cam_lookat_target))
+        self.cam_theta += self.cam_speed
