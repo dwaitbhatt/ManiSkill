@@ -78,7 +78,7 @@ class Args:
     """the frequency of evaluating the agent on the evaluation environments"""
     save_freq: Optional[int] = None
     """the frequency of saving the model checkpoints. By default this is None and will only save checkpoints based on the best evaluation metrics."""
-    num_eval_episodes: int = 100
+    num_eval_episodes: int = 10
     """the number of episodes to evaluate the agent on"""
     num_eval_envs: int = 10
     """the number of parallel environments to evaluate the agent on"""
@@ -374,7 +374,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.use_deterministic_algorithms(args.torch_deterministic)
+    # torch.use_deterministic_algorithms(args.torch_deterministic)
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     control_mode = os.path.split(args.demo_path)[1].split(".")[2]
@@ -455,7 +455,7 @@ if __name__ == "__main__":
     best_eval_metrics = defaultdict(float)
 
     eval_count = 0
-    for iteration, batch in enumerate(data_loader):
+    for iteration, batch in tqdm(enumerate(data_loader), total=args.total_iters):
         log_dict = {}
 
         optimizer.zero_grad()
@@ -504,10 +504,11 @@ if __name__ == "__main__":
                         f"New best {k}_rate: {eval_metrics[k]:.4f}. Saving checkpoint."
                     )
 
-            if eval_count % args.wandb_video_freq == 0:
+            if args.track and args.wandb_video_freq > 0 and eval_count % args.wandb_video_freq == 0:
                 video_files = sorted([f for f in os.listdir(video_dir) if f.endswith('.mp4')])
                 video_name = video_files[-1] if video_files else None
                 wandb.log({"video": wandb.Video(f"{video_dir}/{video_name}", fps=30)})
+            eval_count += 1
 
         if args.save_freq is not None and iteration % args.save_freq == 0:
             save_ckpt(run_name, str(iteration))
