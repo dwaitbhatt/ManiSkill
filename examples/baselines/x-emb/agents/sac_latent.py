@@ -140,6 +140,7 @@ class SACTransferAgent(ActorCriticAgent):
 
         self.env_obs_dim = envs.single_observation_space.shape[0] - self.robot_obs_dim
         args.bin_size = (args.vmax - args.vmin) / (args.num_bins-1)
+        self.robot_action_dim = np.prod(envs.single_action_space.shape)
 
         if not args.disable_obs_encoders:
             self.latent_obs_dim = args.latent_robot_obs_dim + args.latent_env_obs_dim
@@ -168,7 +169,7 @@ class SACTransferAgent(ActorCriticAgent):
         self.ldyn_rew_act_dim = None
         if not args.disable_act_encoder:
             self.act_encoder = mlp(
-                np.prod(envs.single_observation_space.shape) + np.prod(envs.single_action_space.shape),
+                np.prod(envs.single_observation_space.shape) + self.robot_action_dim,
                 [args.enc_dim] * (args.num_layers - 1),
                 args.latent_action_dim,
                 final_act=SimNorm(args)
@@ -177,7 +178,7 @@ class SACTransferAgent(ActorCriticAgent):
             self.ldyn_rew_act_dim = args.latent_action_dim
         else:
             self.act_encoder = nn.Identity()
-            self.ldyn_rew_act_dim = np.prod(envs.single_action_space.shape)
+            self.ldyn_rew_act_dim = self.robot_action_dim
 
         if not args.disable_latent_dynamics:
             self.latent_forward_dynamics = mlp(

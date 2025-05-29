@@ -184,9 +184,13 @@ class Args:
     only_train_adapters: bool = False
     """whether to only train the adapter layers"""
     use_latent_adversary: bool = True
-    """whether to use a latent adversary"""
-    lambda_latent_gp: float = 10.0
-    """the lambda for the latent gradient penalty"""
+    """whether to use a latent adversarial loss (to help train target encoders)"""
+    use_target_adversary: bool = True
+    """whether to use a target adversarial loss (to help train target decoder)"""
+    use_source_adversary: bool = True
+    """whether to use a source adversarial loss (to help train target encoders)"""
+    lambda_gp: float = 10.0
+    """the lambda for the gradient penalty"""
     lambda_latent_dynamics_loss: float = 10.0
     """the lambda for the latent dynamics loss"""
     discriminator_update_freq: int = 5

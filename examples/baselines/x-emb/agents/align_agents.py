@@ -42,6 +42,17 @@ class AgentAligner:
                                         [args.mlp_dim] * args.num_layers, 
                                         1).to(self.device)
         self.latent_disc_optimizer = torch.optim.Adam(self.latent_disc.parameters(), lr=args.lr)
+        
+        self.source_disc = disc_mlp(self.source_agent.robot_obs_dim + self.source_agent.robot_action_dim, 
+                                    [args.mlp_dim] * args.num_layers, 
+                                    1).to(self.device)
+        self.source_disc_optimizer = torch.optim.Adam(self.source_disc.parameters(), lr=args.lr)
+
+        self.target_disc = disc_mlp(self.target_agent.robot_obs_dim + self.target_agent.robot_action_dim, 
+                                    [args.mlp_dim] * args.num_layers, 
+                                    1).to(self.device)
+        self.target_disc_optimizer = torch.optim.Adam(self.target_disc.parameters(), lr=args.lr)
+
         self.obs_encoder_optimizer = torch.optim.Adam(self.target_agent.robot_obs_encoder.parameters(), args.lr)
         self.act_encoder_optimizer = torch.optim.Adam(self.target_agent.act_encoder.parameters(), args.lr)
         self.act_decoder_optimizer = torch.optim.Adam(self.target_agent.act_decoder.parameters(), lr=args.lr)
@@ -63,7 +74,7 @@ class AgentAligner:
             t_module.requires_grad = False
         
 
-    def compute_gradient_penalty(self, D, real_samples, fake_samples):
+    def compute_gradient_penalty(self, D, real_samples, fake_samples) -> torch.Tensor:
         """Calculates the gradient penalty loss for WGAN GP"""
         # Random weight term for interpolation between real and fake samples
         alpha = torch.rand((real_samples.size(0), 1)).to(self.device)
@@ -92,10 +103,92 @@ class AgentAligner:
         return data
 
 
+    def get_second_robot_generator_loss(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, 
+                                        second_agent_name: str, global_step: int) -> torch.Tensor:
+        if second_agent_name == "source":
+            first_agent = self.target_agent
+            first_robot_data = target_data
+            second_agent = self.source_agent
+            second_robot_data = source_data
+            second_disc = self.source_disc
+        elif second_agent_name == "target":
+            first_agent = self.source_agent
+            first_robot_data = source_data
+            second_agent = self.target_agent
+            second_robot_data = target_data
+            second_disc = self.target_disc
+        else:
+            raise ValueError(f"Invalid second agent name: {second_agent_name}, must be 'source' or 'target'")
+        
+        with torch.set_grad_enabled(second_agent_name == "source"):
+            # If condition is true, then first agent is target, and we compute their gradients
+            # Hence when second agent is source, we train target encoders
+            first_latent_obs = first_agent.encode_obs(first_robot_data.obs)
+            first_latent_act = first_agent.encode_action(first_robot_data.obs, first_robot_data.actions)
+        
+        with torch.set_grad_enabled(second_agent_name == "target"):
+            # If condition is true, then second agent is target, and we compute their gradients
+            # Hence when second agent is target, we train target decoder
+            first_to_second_act = second_agent.decode_action(first_latent_obs, first_latent_act)
+        second_robot_obs = second_robot_data.obs[:, :second_agent.robot_obs_dim]
+        first_to_second_input = torch.cat([second_robot_obs, first_to_second_act], dim=-1)
+        
+        second_gen_loss = -second_disc(first_to_second_input).mean()
+        
+        if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker[f"losses/{second_agent_name}_gen_loss"] = second_gen_loss.item()
+        
+        return second_gen_loss
+    
+
+    def update_second_robot_discriminator(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, 
+                                          second_agent_name: str, global_step: int):
+        if second_agent_name == "source":
+            first_agent = self.target_agent
+            first_robot_data = target_data
+            second_agent = self.source_agent
+            second_robot_data = source_data
+            second_disc = self.source_disc
+            second_disc_optimizer = self.source_disc_optimizer
+        elif second_agent_name == "target":
+            first_agent = self.source_agent
+            first_robot_data = source_data
+            second_agent = self.target_agent
+            second_robot_data = target_data
+            second_disc = self.target_disc
+            second_disc_optimizer = self.target_disc_optimizer
+        else:
+            raise ValueError(f"Invalid second agent name: {second_agent_name}, must be 'source' or 'target'")
+        
+        with torch.set_grad_enabled(second_agent_name == "source"):
+            first_latent_obs = first_agent.encode_obs(first_robot_data.obs)
+            first_latent_act = first_agent.encode_action(first_robot_data.obs, first_robot_data.actions)
+        
+            second_robot_obs = second_robot_data.obs[:, :second_agent.robot_obs_dim]
+            first_to_second_act = second_agent.decode_action(first_latent_obs, first_latent_act)
+            first_to_second_input = torch.cat([second_robot_obs, first_to_second_act], dim=-1)
+            
+            second_robot_action = second_robot_data.actions
+            second_robot_input = torch.cat([second_robot_obs, second_robot_action], dim=-1)
+        
+        second_disc_loss = second_disc(first_to_second_input).mean() - second_disc(second_robot_input).mean()
+        second_gp = self.compute_gradient_penalty(second_disc, second_robot_input, first_to_second_input)
+        second_disc_loss += second_gp * self.args.lambda_gp
+        
+        second_disc_optimizer.zero_grad()
+        second_disc_loss.backward()
+        second_disc_optimizer.step()
+        
+        if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
+            self.logging_tracker[f"losses/{second_agent_name}_disc_loss"] = second_disc_loss.item()
+            self.logging_tracker[f"losses/{second_agent_name}_gp"] = second_gp.item()
+
+
     def get_latent_generator_loss(self, target_data: ReplayBufferSample, global_step: int) -> torch.Tensor:
         target_latent_obs = self.target_agent.encode_obs(target_data.obs)
         target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
         target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
+        
         latent_gen_loss = -self.latent_disc(target_input).mean()
         
         if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
@@ -104,19 +197,19 @@ class AgentAligner:
         return latent_gen_loss
 
 
-    def update_discriminator(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
+    def update_latent_discriminator(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
         with torch.no_grad():
             source_latent_obs = self.source_agent.encode_obs(source_data.obs)
             source_latent_act = self.source_agent.encode_action(source_data.obs, source_data.actions)
-            source_input = torch.cat([source_latent_obs, source_latent_act], dim=-1)
+            source_latent_input = torch.cat([source_latent_obs, source_latent_act], dim=-1)
 
             target_latent_obs = self.target_agent.encode_obs(target_data.obs)
             target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
-            target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
+            target_latent_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
 
-        latent_disc_loss = self.latent_disc(target_input).mean() - self.latent_disc(source_input).mean()
-        latent_gp = self.compute_gradient_penalty(self.latent_disc, source_input, target_input)
-        latent_disc_loss += latent_gp * self.args.lambda_latent_gp
+        latent_disc_loss = self.latent_disc(target_latent_input).mean() - self.latent_disc(source_latent_input).mean()
+        latent_gp = self.compute_gradient_penalty(self.latent_disc, source_latent_input, target_latent_input)
+        latent_disc_loss += latent_gp * self.args.lambda_gp
 
         self.latent_disc_optimizer.zero_grad()
         latent_disc_loss.backward()
@@ -160,22 +253,34 @@ class AgentAligner:
         target_data = self.pad_obs(target_data)
         
         for _ in range(self.args.discriminator_update_freq):
-            self.update_discriminator(source_data, target_data, global_step)
-        
+            if self.args.use_latent_adversary:
+                self.update_latent_discriminator(source_data, target_data, global_step)
+            if self.args.use_source_adversary:
+                self.update_second_robot_discriminator(source_data, target_data, "source", global_step)
+            if self.args.use_target_adversary:
+                self.update_second_robot_discriminator(source_data, target_data, "target", global_step)
         self.obs_encoder_optimizer.zero_grad()
         self.act_encoder_optimizer.zero_grad()
         self.act_decoder_optimizer.zero_grad()
 
-        latent_gen_loss = self.get_latent_generator_loss(target_data, global_step)
+        encoder_generator_loss = 0
+        if self.args.use_latent_adversary:
+            encoder_generator_loss += self.get_latent_generator_loss(target_data, global_step)
+        if self.args.use_source_adversary:
+            encoder_generator_loss += self.get_second_robot_generator_loss(source_data, target_data, "source", global_step)
         latent_dynamics_loss = self.target_agent.get_latent_dynamics_loss(target_data, global_step)
-        total_encoders_loss = latent_gen_loss + self.args.lambda_latent_dynamics_loss * latent_dynamics_loss
+        total_encoders_loss = encoder_generator_loss + self.args.lambda_latent_dynamics_loss * latent_dynamics_loss
         total_encoders_loss.backward()
 
         self.obs_encoder_optimizer.step()
 
         act_recon_loss = self.get_action_recon_loss(target_data, global_step)
         act_cycle_loss = self.get_action_cycle_consistency_loss(source_data, target_data, global_step)
-        total_action_loss = act_recon_loss + act_cycle_loss
+        
+        decoder_generator_loss = 0
+        if self.args.use_target_adversary:
+            decoder_generator_loss += self.get_second_robot_generator_loss(source_data, target_data, "target", global_step)
+        total_action_loss = act_recon_loss + act_cycle_loss + decoder_generator_loss
         total_action_loss.backward()
 
         self.act_encoder_optimizer.step()
