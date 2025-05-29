@@ -169,7 +169,7 @@ class SACTransferAgent(ActorCriticAgent):
         self.ldyn_rew_act_dim = None
         if not args.disable_act_encoder:
             self.act_encoder = mlp(
-                np.prod(envs.single_observation_space.shape) + self.robot_action_dim,
+                self.robot_obs_dim + self.robot_action_dim,
                 [args.enc_dim] * (args.num_layers - 1),
                 args.latent_action_dim,
                 final_act=SimNorm(args)
@@ -278,7 +278,7 @@ class SACTransferAgent(ActorCriticAgent):
         if self.args.disable_act_encoder:
             latent_action = action
         else:
-            latent_action = self.act_encoder(torch.cat([obs, action], dim=-1))
+            latent_action = self.act_encoder(torch.cat([obs[:, :self.robot_obs_dim], action], dim=-1))
         return latent_action
     
     def decode_action(self, latent_obs: torch.Tensor, latent_action: torch.Tensor) -> torch.Tensor:
