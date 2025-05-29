@@ -38,7 +38,7 @@ class AgentAligner:
                 freeze_mlp_layers(self.target_agent.act_encoder, args.adapter_layers, -1)
                 freeze_mlp_layers(self.target_agent.act_decoder.net, 0, -1 - args.adapter_layers)
         
-        self.latent_disc = disc_mlp(self.source_agent.latent_actor.latent_obs_dim + self.source_agent.latent_actor.latent_action_dim, 
+        self.latent_disc = disc_mlp(self.args.latent_robot_obs_dim + self.args.latent_action_dim, 
                                         [args.mlp_dim] * args.num_layers, 
                                         1).to(self.device)
         self.latent_disc_optimizer = torch.optim.Adam(self.latent_disc.parameters(), lr=args.lr)
@@ -185,9 +185,9 @@ class AgentAligner:
 
 
     def get_latent_generator_loss(self, target_data: ReplayBufferSample, global_step: int) -> torch.Tensor:
-        target_latent_obs = self.target_agent.encode_obs(target_data.obs)
+        target_latent_robot_obs = self.target_agent.encode_obs(target_data.obs, skip_env_obs=True)
         target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
-        target_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
+        target_input = torch.cat([target_latent_robot_obs, target_latent_act], dim=-1)
         
         latent_gen_loss = -self.latent_disc(target_input).mean()
         
@@ -199,13 +199,13 @@ class AgentAligner:
 
     def update_latent_discriminator(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
         with torch.no_grad():
-            source_latent_obs = self.source_agent.encode_obs(source_data.obs)
+            source_latent_robot_obs = self.source_agent.encode_obs(source_data.obs, skip_env_obs=True)
             source_latent_act = self.source_agent.encode_action(source_data.obs, source_data.actions)
-            source_latent_input = torch.cat([source_latent_obs, source_latent_act], dim=-1)
+            source_latent_input = torch.cat([source_latent_robot_obs, source_latent_act], dim=-1)
 
-            target_latent_obs = self.target_agent.encode_obs(target_data.obs)
+            target_latent_robot_obs = self.target_agent.encode_obs(target_data.obs, skip_env_obs=True)
             target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
-            target_latent_input = torch.cat([target_latent_obs, target_latent_act], dim=-1)
+            target_latent_input = torch.cat([target_latent_robot_obs, target_latent_act], dim=-1)
 
         latent_disc_loss = self.latent_disc(target_latent_input).mean() - self.latent_disc(source_latent_input).mean()
         latent_gp = self.compute_gradient_penalty(self.latent_disc, source_latent_input, target_latent_input)

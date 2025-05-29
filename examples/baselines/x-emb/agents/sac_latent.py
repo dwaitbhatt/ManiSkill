@@ -258,15 +258,20 @@ class SACTransferAgent(ActorCriticAgent):
         self.act_encoder.apply(weight_init)
         self.act_decoder.apply(weight_init)
 
-    def encode_obs(self, obs: torch.Tensor) -> torch.Tensor:
+    def encode_obs(self, obs: torch.Tensor, skip_env_obs: bool = False) -> torch.Tensor:
         if self.args.disable_obs_encoders:
             latent_obs = obs
+            if skip_env_obs:
+                latent_obs = latent_obs[:, :self.robot_obs_dim]
         else:
             robot_obs = obs[:, :self.robot_obs_dim]
             env_obs = obs[:, self.robot_obs_dim:]
             latent_robot_obs = self.robot_obs_encoder(robot_obs)
-            latent_env_obs = self.env_obs_encoder(env_obs)
-            latent_obs = torch.cat([latent_robot_obs, latent_env_obs], dim=-1)
+            if skip_env_obs:
+                latent_obs = latent_robot_obs
+            else:
+                latent_env_obs = self.env_obs_encoder(env_obs)
+                latent_obs = torch.cat([latent_robot_obs, latent_env_obs], dim=-1)
         return latent_obs
     
     def encode_action(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
