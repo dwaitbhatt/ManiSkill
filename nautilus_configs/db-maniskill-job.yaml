@@ -72,7 +72,7 @@ spec:
           python examples/baselines/bc/bc_rgbd.py --env-id \"PlaceCube-v1\" --robot \"xarm6_robotiq\" \
             --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.physx_cpu.h5 \
             --control-mode \"pd_joint_vel\" --sim-backend \"gpu\" \
-            --max-episode-steps 150 --total-iters 1000000 --batch-size 128 \
+            --max-episode-steps 1000 --total-iters 1000000 --batch-size 128 \
             --num_eval_envs 8 --num-eval-episodes 8 --memory-efficient \
             --track --wandb_project_name \"maniskill_experiments\" --wandb_entity \"ucsd_erl\"
           "
@@ -89,11 +89,11 @@ spec:
         resources:
           limits:
             nvidia.com/gpu: "1"
-            memory: "72G"
+            memory: "64G"
             cpu: "32"
           requests:
             nvidia.com/gpu: "1"
-            memory: "64G"
+            memory: "50G"
             cpu: "24"
       affinity:
         # nodeAffinity:

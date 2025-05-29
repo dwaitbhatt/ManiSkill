@@ -399,7 +399,7 @@ if __name__ == "__main__":
             **env_kwargs,
             num_envs=args.num_eval_envs,
             env_id=args.env_id,
-            env_horizon=150#gym_utils.find_max_episode_steps_value(envs),
+            # env_horizon=150 #gym_utils.find_max_episode_steps_value(envs),
         )
         wandb.init(
             project=args.wandb_project_name,
