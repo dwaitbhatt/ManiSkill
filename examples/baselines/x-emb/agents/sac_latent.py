@@ -120,7 +120,7 @@ class ActionDecoder(NormalizedActor):
     def __init__(self, envs: ManiSkillVectorEnv, args: Args):
         super().__init__(envs, args)
         self.net = mlp(
-            args.latent_obs_dim + args.latent_action_dim,
+            args.latent_action_dim,
             [args.mlp_dim] * args.num_layers,
             np.prod(envs.single_action_space.shape),
         )
@@ -169,7 +169,7 @@ class SACTransferAgent(ActorCriticAgent):
         self.ldyn_rew_act_dim = None
         if not args.disable_act_encoder:
             self.act_encoder = mlp(
-                self.robot_obs_dim + self.robot_action_dim,
+                self.robot_action_dim,
                 [args.enc_dim] * (args.num_layers - 1),
                 args.latent_action_dim,
                 final_act=SimNorm(args)
@@ -274,34 +274,34 @@ class SACTransferAgent(ActorCriticAgent):
                 latent_obs = torch.cat([latent_robot_obs, latent_env_obs], dim=-1)
         return latent_obs
     
-    def encode_action(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+    def encode_action(self, action: torch.Tensor) -> torch.Tensor:
         if self.args.disable_act_encoder:
             latent_action = action
         else:
-            latent_action = self.act_encoder(torch.cat([obs[:, :self.robot_obs_dim], action], dim=-1))
+            latent_action = self.act_encoder(action)
         return latent_action
     
-    def decode_action(self, latent_obs: torch.Tensor, latent_action: torch.Tensor) -> torch.Tensor:
+    def decode_action(self, latent_action: torch.Tensor) -> torch.Tensor:
         if self.args.disable_act_decoder:
             action = latent_action
         else:
-            action = self.act_decoder(torch.cat([latent_obs, latent_action], dim=-1))
+            action = self.act_decoder(latent_action)
         return action
     
     def sample_action(self, obs: torch.Tensor) -> torch.Tensor:
         latent_obs = self.encode_obs(obs)
         latent_action, _, _ = self.latent_actor(latent_obs)
-        return self.decode_action(latent_obs, latent_action)
+        return self.decode_action(latent_action)
     
     def get_eval_action(self, obs: torch.Tensor) -> torch.Tensor:
         latent_obs = self.encode_obs(obs)
         latent_action = self.latent_actor.get_eval_action(latent_obs)
-        return self.decode_action(latent_obs, latent_action)
+        return self.decode_action(latent_action)
 
     def update_actor(self, data: ReplayBufferSample, global_step: int):
         latent_obs = self.encode_obs(data.obs)
         latent_pi, latent_log_pi, _ = self.latent_actor(latent_obs)
-        pi = self.decode_action(latent_obs, latent_pi)
+        pi = self.decode_action(latent_pi)
         qf1_pi = self.qf1(latent_obs, pi)
         qf2_pi = self.qf2(latent_obs, pi)
         qf1_pi, qf2_pi = math_utils.two_hot_inv(qf1_pi, self.args), math_utils.two_hot_inv(qf2_pi, self.args)
@@ -336,7 +336,7 @@ class SACTransferAgent(ActorCriticAgent):
         # update the value networks
         with torch.no_grad():
             latent_next_actions, latent_next_log_pi, _ = self.latent_actor(latent_next_obs)
-            next_actions = self.decode_action(latent_next_obs, latent_next_actions)
+            next_actions = self.decode_action(latent_next_actions)
             qf1_next_target = self.qf1_target(latent_next_obs, next_actions)
             qf2_next_target = self.qf2_target(latent_next_obs, next_actions)
             qf1_next_target, qf2_next_target = math_utils.two_hot_inv(qf1_next_target, self.args), math_utils.two_hot_inv(qf2_next_target, self.args)
@@ -362,7 +362,7 @@ class SACTransferAgent(ActorCriticAgent):
     def get_latent_dynamics_loss(self, data: ReplayBufferSample, global_step: int):
         latent_obs = self.encode_obs(data.obs)
         latent_next_obs = self.encode_obs(data.next_obs)
-        latent_action = self.encode_action(data.obs, data.actions)
+        latent_action = self.encode_action(data.actions)
         
         pred_latent_next_obs = self.latent_forward_dynamics(torch.cat([latent_obs, latent_action], dim=-1))
         latent_forward_dynamics_loss = F.mse_loss(pred_latent_next_obs, latent_next_obs)
@@ -385,7 +385,7 @@ class SACTransferAgent(ActorCriticAgent):
 
     def get_rew_predictor_loss(self, data: ReplayBufferSample, global_step: int):
         latent_obs = self.encode_obs(data.obs)
-        latent_action = self.encode_action(data.obs, data.actions)
+        latent_action = self.encode_action(data.actions)
         
         pred_rew = self.rew_predictor(torch.cat([latent_obs, latent_action], dim=-1))
         rew_loss = math_utils.soft_ce(pred_rew, data.rewards[:, None], self.args).mean()
@@ -396,10 +396,8 @@ class SACTransferAgent(ActorCriticAgent):
         return rew_loss
     
     def get_action_recon_loss(self, data: ReplayBufferSample, global_step: int):
-        with torch.no_grad():
-            latent_obs = self.encode_obs(data.obs)
-        latent_action = self.encode_action(data.obs, data.actions)
-        decoded_action = self.decode_action(latent_obs, latent_action)
+        latent_action = self.encode_action(data.actions)
+        decoded_action = self.decode_action(latent_action)
 
         act_recon_loss = F.mse_loss(data.actions, decoded_action)
 
