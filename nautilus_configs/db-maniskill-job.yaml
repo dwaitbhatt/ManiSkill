@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: db-maniskill-job-xarm6-bcrgbd-memeff
+  name: db-maniskill-job-xarm6-bcrgbd
 spec:
   template:
     spec:
@@ -73,7 +73,7 @@ spec:
             --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.physx_cpu.h5 \
             --control-mode \"pd_joint_vel\" --sim-backend \"gpu\" \
             --max-episode-steps 1000 --total-iters 1000000 --batch-size 128 \
-            --num_eval_envs 8 --num-eval-episodes 8 --memory-efficient \
+            --num_eval_envs 8 --num-eval-episodes 8 \
             --track --wandb_project_name \"maniskill_experiments\" --wandb_entity \"ucsd_erl\"
           "
         ]
