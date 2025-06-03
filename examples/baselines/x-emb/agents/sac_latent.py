@@ -440,24 +440,23 @@ class SACTransferAgent(ActorCriticAgent):
                 self.rew_predictor_optimizer.zero_grad()
             if not self.args.disable_act_encoder:
                 self.act_encoder_optimizer.zero_grad()
+            if not self.args.disable_act_decoder:
+                self.act_decoder_optimizer.zero_grad()
 
             total_latent_loss.backward()
 
             self.q_optimizer.step()
-            if not self.args.disable_obs_encoders:
-                self.obs_encoder_optimizer.step()
             if not self.args.disable_latent_dynamics:
                 self.latent_dynamics_optimizer.step()
             if not self.args.disable_rew_predictor:
                 self.rew_predictor_optimizer.step()
             
-            if not self.args.disable_act_decoder:
-                self.act_decoder_optimizer.zero_grad()
-
             self.update_actor(data, global_step)
             act_recon_loss = self.get_action_recon_loss(data, global_step)
             act_recon_loss.backward()
 
+            if not self.args.disable_obs_encoders:
+                self.obs_encoder_optimizer.step()
             if not self.args.disable_act_encoder:
                 self.act_encoder_optimizer.step()
             if not self.args.disable_act_decoder:
