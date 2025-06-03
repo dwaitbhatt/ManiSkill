@@ -368,8 +368,11 @@ class SACTransferAgent(ActorCriticAgent):
         latent_forward_dynamics_loss = F.mse_loss(pred_latent_next_obs, latent_next_obs)
         
         pred_latent_action = self.latent_inverse_dynamics(torch.cat([latent_obs, latent_next_obs], dim=-1))
-        decoded_pred_latent_action = self.decode_action(pred_latent_action)
-        latent_inverse_dynamics_loss = F.mse_loss(decoded_pred_latent_action, data.actions)
+        if self.args.disable_act_encoder:
+            normalized_latent_action = (latent_action - self.latent_actor.action_bias) / self.latent_actor.action_scale
+        else:
+            normalized_latent_action = latent_action
+        latent_inverse_dynamics_loss = F.mse_loss(pred_latent_action, normalized_latent_action)
         
         latent_dynamics_loss = latent_forward_dynamics_loss + latent_inverse_dynamics_loss
 
