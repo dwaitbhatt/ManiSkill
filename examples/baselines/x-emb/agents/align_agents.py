@@ -219,18 +219,24 @@ class AgentAligner:
 
 
     def get_action_cycle_consistency_loss(self, source_data: ReplayBufferSample, target_data: ReplayBufferSample, global_step: int):
-        target_latent_obs = self.target_agent.encode_obs(target_data.obs)
-        target_latent_act = self.target_agent.encode_action(target_data.obs, target_data.actions)
+        target_latent_act = self.target_agent.encode_action(target_data.actions)
+        with torch.no_grad():
+            source_constr_act = self.source_agent.decode_action(target_latent_act)
+            source_latent_constr_act = self.source_agent.encode_action(source_constr_act)
+        target_constr_act = self.target_agent.decode_action(source_latent_constr_act)
+
+        act_cycle_loss_target = F.mse_loss(target_constr_act, target_data.actions)
 
         with torch.no_grad():
-            source_constr_act = self.source_agent.decode_action(target_latent_obs, target_latent_act)
-            source_latent_obs = self.source_agent.encode_obs(source_data.obs)
-            source_latent_constr_act = self.source_agent.encode_action(source_data.obs, source_constr_act)
+            source_latent_act = self.source_agent.encode_action(source_data.actions)
+        target_constr_act = self.target_agent.decode_action(source_latent_act)
+        target_latent_constr_act = self.target_agent.encode_action(target_constr_act)
+        with torch.no_grad():
+            source_constr_act = self.source_agent.decode_action(target_latent_constr_act)        
+        act_cycle_loss_source = F.mse_loss(source_constr_act, source_data.actions)
+
+        act_cycle_loss = act_cycle_loss_target + act_cycle_loss_source
         
-        target_constr_act = self.target_agent.decode_action(source_latent_obs, source_latent_constr_act)
-
-        act_cycle_loss = F.mse_loss(target_constr_act, target_data.actions)
-
         if (global_step - self.args.alignment_batch_size) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker["losses/action_cycle_consistency_loss"] = act_cycle_loss.item()
 
