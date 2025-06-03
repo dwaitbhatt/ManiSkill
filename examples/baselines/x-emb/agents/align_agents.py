@@ -269,7 +269,7 @@ class AgentAligner:
 
         self.obs_encoder_optimizer.step()
 
-        act_recon_loss = self.get_action_recon_loss(target_data, global_step)
+        act_recon_loss = 0 # self.get_action_recon_loss(target_data, global_step)
         act_cycle_loss = self.get_action_cycle_consistency_loss(source_data, target_data, global_step)
         
         decoder_generator_loss = 0
