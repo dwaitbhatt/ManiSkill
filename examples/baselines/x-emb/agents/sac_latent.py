@@ -324,6 +324,7 @@ class SACTransferAgent(ActorCriticAgent):
 
         if (global_step - self.args.training_freq) // self.args.log_freq < global_step // self.args.log_freq:
             self.logging_tracker[f"losses/{self.agent_name}_actor_loss"] = latent_actor_loss.item()
+            self.logging_tracker[f"losses/{self.agent_name}_actor_loss_neg"] = -latent_actor_loss.item()
             self.logging_tracker[f"losses/{self.agent_name}_alpha"] = self.alpha
             if self.args.autotune:
                 self.logging_tracker[f"losses/{self.agent_name}_alpha_loss"] = alpha_loss.item()
