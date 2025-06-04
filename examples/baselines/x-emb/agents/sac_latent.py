@@ -369,11 +369,8 @@ class SACTransferAgent(ActorCriticAgent):
         latent_forward_dynamics_loss = F.mse_loss(pred_latent_next_obs, latent_next_obs)
         
         pred_latent_action = self.latent_inverse_dynamics(torch.cat([latent_obs, latent_next_obs], dim=-1))
-        if self.args.disable_act_encoder:
-            normalized_latent_action = (latent_action - self.latent_actor.action_bias) / self.latent_actor.action_scale
-        else:
-            normalized_latent_action = latent_action
-        latent_inverse_dynamics_loss = F.mse_loss(pred_latent_action, normalized_latent_action)
+        decoded_pred_latent_action = self.decode_action(pred_latent_action)
+        latent_inverse_dynamics_loss = F.mse_loss(decoded_pred_latent_action, data.actions)
         
         latent_dynamics_loss = latent_forward_dynamics_loss + latent_inverse_dynamics_loss
 
@@ -444,24 +441,23 @@ class SACTransferAgent(ActorCriticAgent):
                 self.rew_predictor_optimizer.zero_grad()
             if not self.args.disable_act_encoder:
                 self.act_encoder_optimizer.zero_grad()
+            if not self.args.disable_act_decoder:
+                self.act_decoder_optimizer.zero_grad()
 
             total_latent_loss.backward()
 
             self.q_optimizer.step()
+            if not self.args.disable_obs_encoders:
+                self.obs_encoder_optimizer.step()
             if not self.args.disable_latent_dynamics:
                 self.latent_dynamics_optimizer.step()
             if not self.args.disable_rew_predictor:
                 self.rew_predictor_optimizer.step()
             
-            if not self.args.disable_act_decoder:
-                self.act_decoder_optimizer.zero_grad()
-
             self.update_actor(data, global_step)
             act_recon_loss = self.get_action_recon_loss(data, global_step)
             act_recon_loss.backward()
 
-            if not self.args.disable_obs_encoders:
-                self.obs_encoder_optimizer.step()
             if not self.args.disable_act_encoder:
                 self.act_encoder_optimizer.step()
             if not self.args.disable_act_decoder:
