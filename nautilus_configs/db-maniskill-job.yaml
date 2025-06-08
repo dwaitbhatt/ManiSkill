@@ -13,16 +13,16 @@ spec:
           # "git pull && \
           # python examples/baselines/sac/sac.py \
           #        --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
-          #        --exp_name PlaceCubeMatched3_xarm6_pandagripper_jv_sac \
+          #        --exp_name PlaceCube_xarm6_robotiq_jv_sac \
           #        --env-id PlaceCube-v1 \
-          #        --robot xarm6_pandagripper \
+          #        --robot xarm6_robotiq \
           #        --control_mode pd_joint_vel \
           #        --num-envs 128 \
           #        --training-freq 128 \
           #        --num-eval-steps 100 \
-          #        --eval-freq 100_000 \
-          #        --total-timesteps 10_000_000 \
-          #        --wandb-video-freq 900_000 \
+          #        --eval-freq 50_000 \
+          #        --total-timesteps 2_000_000 \
+          #        --wandb-video-freq 2 \
           #        --track \
           #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
@@ -31,8 +31,8 @@ spec:
           #         model_size=5 \
           #         steps=5_000_000 \
           #         seed=1 \
-          #         wandb_name=PickCube_xarm6_robotiq_tdmpc2 \
-          #         env_id=PickCube-v1 \
+          #         wandb_name=PlaceCube_xarm6_robotiq_tdmpc2 \
+          #         env_id=PlaceCube-v1 \
           #         robot_uids=xarm6_robotiq \
           #         control_mode=pd_joint_vel \
           #         env_type=gpu \
@@ -45,9 +45,9 @@ spec:
           # "git pull && \
           # python examples/baselines/ppo/ppo.py \
           #         --env_id=PlaceCube-v1 \
-          #         --robot_uids=xarm6_pandagripper \
+          #         --robot_uids=xarm6_robotiq \
           #         --control_mode=pd_joint_vel \
-          #         --exp_name=PlaceCubeMatched3_xarm6_pandagripper_jv_ppo \
+          #         --exp_name=PlaceCube_xarm6_robotiq_jv_ppo \
           #         --num_envs=512 \
           #         --num_eval_envs=8 \
           #         --eval_freq=10 \
