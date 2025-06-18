@@ -159,7 +159,7 @@ class Reachy2(BaseAgent):
         ]
         self.all_arm_joint_names = self.r_arm_joint_names + self.l_arm_joint_names
 
-        self.r_hand_joint_names = ["r_hand_finger"]
+        self.r_hand_active_joint_names = ["r_hand_finger"]
         # self.r_hand_joint_names = ["r_hand_finger_proximal", "r_hand_finger_distal"]
         self.r_hand_mimic_joint_names = [
             "r_hand_finger_proximal",
@@ -168,7 +168,7 @@ class Reachy2(BaseAgent):
             "r_hand_finger_distal_mimic"
         ]
 
-        self.l_hand_joint_names = ["l_hand_finger"]
+        self.l_hand_active_joint_names = ["l_hand_finger"]
         # self.l_hand_joint_names = ["l_hand_finger_proximal", "l_hand_finger_distal"]
         self.l_hand_mimic_joint_names = [
             "l_hand_finger_proximal",
@@ -177,7 +177,7 @@ class Reachy2(BaseAgent):
             "l_hand_finger_distal_mimic"
         ]
 
-        self.all_hand_active_joint_names = self.l_hand_joint_names + self.r_hand_joint_names
+        self.all_hand_active_joint_names = self.l_hand_active_joint_names + self.r_hand_active_joint_names
         self.all_hand_passive_joint_names = self.l_hand_mimic_joint_names + self.r_hand_mimic_joint_names
 
         self.head_joint_names = [
@@ -361,15 +361,15 @@ class Reachy2(BaseAgent):
         # NOTE(jigu): IssacGym uses large P and D but with force limit
         # However, tune a good force limit to have a good mimic behavior
 
-        gripper_passive_joints_controller = PassiveControllerConfig(
-            self.all_hand_passive_joint_names,
+        gripper_l_passive_joints_controller = PassiveControllerConfig(
+            self.l_hand_mimic_joint_names,
             damping=0.01,
             friction=0.1,
             force_limit=100,
         )
 
-        gripper_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
-            self.all_hand_active_joint_names,
+        gripper_l_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
+            self.l_hand_active_joint_names,
             lower=0.3,
             upper=0.75,
             stiffness=self.gripper_stiffness,
@@ -379,8 +379,38 @@ class Reachy2(BaseAgent):
             normalize_action=False,
         )
 
-        gripper_mimic_pd_joint_delta_pos = PDJointPosMimicControllerConfig(
-            self.all_hand_active_joint_names,
+        gripper_l_mimic_pd_joint_delta_pos = PDJointPosMimicControllerConfig(
+            self.l_hand_active_joint_names,
+            lower=-0.1,
+            upper=0.1,
+            stiffness=self.gripper_stiffness,
+            damping=self.gripper_damping,
+            force_limit=self.gripper_force_limit,
+            friction=self.gripper_friction,
+            normalize_action=True,
+            use_delta=True,
+        )
+
+        gripper_r_passive_joints_controller = PassiveControllerConfig(
+            self.r_hand_mimic_joint_names,
+            damping=0.01,
+            friction=0.1,
+            force_limit=100,
+        )
+
+        gripper_r_mimic_pd_joint_pos = PDJointPosMimicControllerConfig(
+            self.r_hand_active_joint_names,
+            lower=0.3,
+            upper=0.75,
+            stiffness=self.gripper_stiffness,
+            damping=self.gripper_damping,
+            force_limit=self.gripper_force_limit,
+            friction=self.gripper_friction,
+            normalize_action=False,
+        )
+
+        gripper_r_mimic_pd_joint_delta_pos = PDJointPosMimicControllerConfig(
+            self.r_hand_active_joint_names,
             lower=-0.1,
             upper=0.1,
             stiffness=self.gripper_stiffness,
@@ -468,8 +498,10 @@ class Reachy2(BaseAgent):
         controller_configs = dict(
             pd_joint_delta_pos=dict(
                 arms=arms_pd_joint_delta_pos,
-                gripper_active=gripper_mimic_pd_joint_delta_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_joint_delta_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -477,8 +509,10 @@ class Reachy2(BaseAgent):
             ),
             pd_joint_pos=dict(
                 arms=arms_pd_joint_pos,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,                
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -487,8 +521,10 @@ class Reachy2(BaseAgent):
             pd_ee_delta_pos=dict(
                 l_arm=l_arm_pd_ee_delta_pos,
                 r_arm=r_arm_pd_ee_delta_pos,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,                
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -497,8 +533,10 @@ class Reachy2(BaseAgent):
             pd_ee_delta_pose=dict(
                 l_arm=l_arm_pd_ee_delta_pose,
                 r_arm=r_arm_pd_ee_delta_pose,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,                
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -507,8 +545,10 @@ class Reachy2(BaseAgent):
             pd_ee_delta_pose_align=dict(
                 l_arm=l_arm_pd_ee_delta_pose_align,
                 r_arm=r_arm_pd_ee_delta_pose_align,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -517,8 +557,10 @@ class Reachy2(BaseAgent):
             # TODO(jigu): how to add boundaries for the following controllers
             pd_joint_target_delta_pos=dict(
                 arms=arms_pd_joint_target_delta_pos,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -527,8 +569,10 @@ class Reachy2(BaseAgent):
             pd_ee_target_delta_pos=dict(
                 l_arm=l_arm_pd_ee_target_delta_pos,
                 r_arm=r_arm_pd_ee_target_delta_pos,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -537,8 +581,10 @@ class Reachy2(BaseAgent):
             pd_ee_target_delta_pose=dict(
                 l_arm=l_arm_pd_ee_target_delta_pose,
                 r_arm=r_arm_pd_ee_target_delta_pose,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -547,8 +593,10 @@ class Reachy2(BaseAgent):
             # Caution to use the following controllers
             pd_joint_vel=dict(
                 arms=arms_pd_joint_vel,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -556,8 +604,10 @@ class Reachy2(BaseAgent):
             ),
             pd_joint_pos_vel=dict(
                 arms=arms_pd_joint_pos_vel,
-                gripper_active=gripper_mimic_pd_joint_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,  
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -565,8 +615,10 @@ class Reachy2(BaseAgent):
             ),
             pd_joint_delta_pos_vel=dict(
                 arms=arms_pd_joint_delta_pos_vel,
-                gripper_active=gripper_mimic_pd_joint_delta_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=head_pd_joint_delta_pos,
                 tripod_active=tripod_mimic_joint_delta_pos,
                 tripod_passive=tripod_passive_joints_controller,
@@ -574,8 +626,10 @@ class Reachy2(BaseAgent):
             ),
             pd_joint_delta_pos_stiff_body=dict(
                 arms=arms_pd_joint_delta_pos,
-                gripper_active=gripper_mimic_pd_joint_delta_pos,
-                gripper_passive=gripper_passive_joints_controller,
+                gripper_r_active=gripper_r_mimic_pd_joint_delta_pos,
+                gripper_r_passive=gripper_r_passive_joints_controller,
+                gripper_l_active=gripper_l_mimic_pd_joint_delta_pos,
+                gripper_l_passive=gripper_l_passive_joints_controller,
                 head=stiff_head_pd_joint_pos,
                 tripod_active=stiff_tripod_pd_joint_pos,
                 tripod_passive=tripod_passive_joints_controller,
