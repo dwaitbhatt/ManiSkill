@@ -53,6 +53,8 @@ class Args:
     """Seed(s) for random actions and simulator. Can be a single integer or a list of integers. Default is None (no seeds)"""
 
 def main(args: Args):
+    if args.render_mode == "none":
+        args.render_mode = None
     np.set_printoptions(suppress=True, precision=3)
     verbose = not args.quiet
     if isinstance(args.seed, int):
@@ -82,6 +84,8 @@ def main(args: Args):
     )
     if args.robot_uids is not None:
         env_kwargs["robot_uids"] = tuple(args.robot_uids.split(","))
+        if len(env_kwargs["robot_uids"]) == 1:
+            env_kwargs["robot_uids"] = env_kwargs["robot_uids"][0]
     env: BaseEnv = gym.make(
         args.env_id,
         **env_kwargs

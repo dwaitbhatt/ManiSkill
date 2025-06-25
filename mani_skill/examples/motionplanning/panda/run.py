@@ -9,16 +9,19 @@ from tqdm import tqdm
 import os.path as osp
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.trajectory.merge_trajectory import merge_trajectories
-from mani_skill.examples.motionplanning.panda.solutions import solvePushCube, solvePickCube, solveStackCube, solvePegInsertionSide, solvePlugCharger, solvePullCubeTool, solveLiftPegUpright, solvePullCube, solvePlaceCube
+from mani_skill.examples.motionplanning.panda.solutions import solvePushCube, solvePickCube, solveStackCube, solvePegInsertionSide, solvePlugCharger, solvePullCubeTool, solveLiftPegUpright, solvePullCube, solveDrawTriangle, solveDrawSVG, solvePlaceSphere, solvePlaceCube
 MP_SOLUTIONS = {
+    "DrawTriangle-v1": solveDrawTriangle,
     "PickCube-v1": solvePickCube,
     "StackCube-v1": solveStackCube,
     "PegInsertionSide-v1": solvePegInsertionSide,
     "PlugCharger-v1": solvePlugCharger,
+    "PlaceSphere-v1": solvePlaceSphere,
     "PushCube-v1": solvePushCube,
     "PullCubeTool-v1": solvePullCubeTool,
     "LiftPegUpright-v1": solveLiftPegUpright,
     "PullCube-v1": solvePullCube,
+    "DrawSVG-v1" : solveDrawSVG,
     "PlaceCube-v1": solvePlaceCube,
 }
 def parse_args(args=None):
@@ -45,7 +48,6 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
         obs_mode=args.obs_mode,
         control_mode="pd_joint_pos",
         render_mode=args.render_mode,
-        reward_mode="dense" if args.reward_mode is None else args.reward_mode,
         sensor_configs=dict(shader_pack=args.shader),
         human_render_camera_configs=dict(shader_pack=args.shader),
         viewer_camera_configs=dict(shader_pack=args.shader),
@@ -53,7 +55,7 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
     )
     if env_id not in MP_SOLUTIONS:
         raise RuntimeError(f"No already written motion planning solutions for {env_id}. Available options are {list(MP_SOLUTIONS.keys())}")
-    
+
     if not args.traj_name:
         new_traj_name = time.strftime("%Y%m%d_%H%M%S")
     else:
@@ -68,6 +70,7 @@ def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
         source_type="motionplanning",
         source_desc="official motion planning solution from ManiSkill contributors",
         video_fps=30,
+        record_reward=False,
         save_on_reset=False
     )
     output_h5_path = env._h5_file.filename

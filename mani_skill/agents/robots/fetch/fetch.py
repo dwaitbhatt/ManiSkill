@@ -27,6 +27,7 @@ FETCH_BASE_COLLISION_BIT = 31
 class Fetch(BaseAgent):
     uid = "fetch"
     urdf_path = f"{PACKAGE_ASSET_DIR}/robots/fetch/fetch.urdf"
+    urdf_arm_ik_path = f"{PACKAGE_ASSET_DIR}/robots/fetch/fetch_torso_up.urdf"
     urdf_config = dict(
         _materials=dict(
             gripper=dict(static_friction=2.0, dynamic_friction=2.0, restitution=0.0)
@@ -44,25 +45,7 @@ class Fetch(BaseAgent):
     keyframes = dict(
         rest=Keyframe(
             pose=sapien.Pose(),
-            qpos=np.array(
-                [
-                    0,
-                    0,
-                    0,
-                    0.386,
-                    0,
-                    -0.370,
-                    0.562,
-                    -1.032,
-                    0.695,
-                    0.955,
-                    -0.1,
-                    2.077,
-                    0,
-                    0.015,
-                    0.015,
-                ]
-            ),
+            qpos=np.array([0, 0, 0, 0.386, 0, -0.370, 0.562, -1.032, 0.695, 0.955, -0.1, 2.077, 0, 0.015, 0.015]),  # fmt: skip
         )
     )
 
@@ -167,7 +150,8 @@ class Fetch(BaseAgent):
             damping=self.arm_damping,
             force_limit=self.arm_force_limit,
             ee_link=self.ee_link_name,
-            urdf_path=self.urdf_path,
+            urdf_path=self.urdf_arm_ik_path,
+            root_link_name="torso_lift_link",
         )
         arm_pd_ee_delta_pose = PDEEPoseControllerConfig(
             joint_names=self.arm_joint_names,
@@ -179,7 +163,8 @@ class Fetch(BaseAgent):
             damping=self.arm_damping,
             force_limit=self.arm_force_limit,
             ee_link=self.ee_link_name,
-            urdf_path=self.urdf_path,
+            urdf_path=self.urdf_arm_ik_path,
+            root_link_name="torso_lift_link",
         )
 
         arm_pd_ee_target_delta_pos = deepcopy(arm_pd_ee_delta_pos)
@@ -232,6 +217,7 @@ class Fetch(BaseAgent):
             self.gripper_stiffness,
             self.gripper_damping,
             self.gripper_force_limit,
+            mimic={"r_gripper_finger_joint": {"joint": "l_gripper_finger_joint"}},
         )
 
         # -------------------------------------------------------------------------- #
@@ -433,6 +419,10 @@ class Fetch(BaseAgent):
         T[:3, :3] = np.stack([ortho, closing, approaching], axis=1)
         T[:3, 3] = center
         return sapien.Pose(T)
+
+    @property
+    def tcp_pos(self) -> Pose:
+        return (self.finger1_link.pose.p + self.finger2_link.pose.p) / 2
 
     @property
     def tcp_pose(self) -> Pose:

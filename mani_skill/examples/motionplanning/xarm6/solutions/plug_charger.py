@@ -78,7 +78,7 @@ def solve(env: PlugChargerEnv, seed=None, debug=False, vis=False):
     # Reach
     # -------------------------------------------------------------------------- #
     reach_pose = grasp_pose * sapien.Pose([0, 0, -0.05])
-    planner.move_to_pose_with_screw(reach_pose)
+    planner.move_to_pose_with_RRTStar(reach_pose)
 
     # -------------------------------------------------------------------------- #
     # Grasp
@@ -95,7 +95,7 @@ def solve(env: PlugChargerEnv, seed=None, debug=False, vis=False):
         * env.charger.pose.sp.inv()
         * env.agent.tcp.pose.sp
     )
-    insert_pose = env.goal_pose.sp * env.charger.pose.sp.inv() * env.agent.tcp.pose.sp
+    insert_pose = env.goal_pose.sp * env.charger.pose.sp.inv() * env.agent.tcp.pose.sp * sapien.Pose([0, 0, -0.005])
     planner.move_to_pose_with_screw(pre_insert_pose, refine_steps=0)
     planner.move_to_pose_with_screw(pre_insert_pose, refine_steps=5)
     # -------------------------------------------------------------------------- #

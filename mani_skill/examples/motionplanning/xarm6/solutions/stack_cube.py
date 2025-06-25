@@ -53,7 +53,7 @@ def solve(env: StackCubeEnv, seed=None, debug=False, vis=False):
     for angle in angles:
         delta_pose = sapien.Pose(q=euler2quat(0, 0, angle))
         grasp_pose2 = grasp_pose * delta_pose
-        res = planner.move_to_pose_with_screw(grasp_pose2, dry_run=True)
+        res = planner.move_to_pose_with_RRTStar(grasp_pose2, dry_run=True)
         if res == -1:
             continue
         grasp_pose = grasp_pose2
@@ -65,7 +65,7 @@ def solve(env: StackCubeEnv, seed=None, debug=False, vis=False):
     # Reach
     # -------------------------------------------------------------------------- #
     reach_pose = grasp_pose * sapien.Pose([0, 0, -0.05])
-    planner.move_to_pose_with_screw(reach_pose)
+    planner.move_to_pose_with_RRTStar(reach_pose)
 
     # -------------------------------------------------------------------------- #
     # Grasp
@@ -85,7 +85,7 @@ def solve(env: StackCubeEnv, seed=None, debug=False, vis=False):
     goal_pose = env.cubeB.pose * sapien.Pose([0, 0, env.cube_half_size[2] * 2])
     offset = (goal_pose.p - env.cubeA.pose.p).numpy()[0] # remember that all data in ManiSkill is batched and a torch tensor
     align_pose = sapien.Pose(lift_pose.p + offset, lift_pose.q)
-    planner.move_to_pose_with_screw(align_pose)
+    planner.move_to_pose_with_RRTStar(align_pose)
 
     res = planner.open_gripper()
     planner.close()

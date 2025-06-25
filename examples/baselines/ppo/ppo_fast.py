@@ -54,7 +54,7 @@ class Args:
     """frequency to upload saved videos to wandb (every nth saved video will be uploaded)"""
     save_trajectory: bool = False
     """whether to save trajectory data into the `videos` folder"""
-    save_model: bool = False
+    save_model: bool = True
     """whether to save model into the `runs/{run_name}` folder"""
     evaluate: bool = False
     """if toggled, only runs evaluation with the given model checkpoint and saves the evaluation trajectories"""

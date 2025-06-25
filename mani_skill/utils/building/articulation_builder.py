@@ -19,9 +19,6 @@ from mani_skill.utils.structs.pose import to_sapien_pose
 if TYPE_CHECKING:
     from mani_skill.envs.scene import ManiSkillScene
 
-SPAWN_SPACING = 5
-SPAWN_START_GAP = 10
-
 
 class ArticulationBuilder(SapienArticulationBuilder):
     scene: ManiSkillScene
@@ -81,8 +78,9 @@ class ArticulationBuilder(SapienArticulationBuilder):
             )
 
             entity.add_component(link_component)
-            if b.visual_records:
-                entity.add_component(b.build_render_component())
+            if self.scene.can_render():
+                if b.visual_records:
+                    entity.add_component(b.build_render_component())
             entity.name = b.name
 
             link_component.name = f"{name_prefix}{b.name}"

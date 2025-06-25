@@ -3,29 +3,20 @@
 Installation of ManiSkill is extremely simple, you only need to run a few pip installs
 
 ```bash
-# install the package
-pip install --upgrade mani_skill
-# install a version of torch that is compatible with your system
-pip install torch torchvision torchaudio
+# install the package and a version of torch that is compatible with your system
+pip install --upgrade mani_skill torch
 ```
 
-You can also install the main `mani_skill` package from github/source:
+We also provide a more frequently updated nightly version updated daily whenever there are changes to ManiSkill:
 
 ```bash
-# GitHub
-pip install --upgrade git+https://github.com/haosulab/ManiSkill.git
-
-# Source
-git clone https://github.com/haosulab/ManiSkill.git
-cd ManiSkill && pip install -e .
-
-# remember to install a version of torch that is compatible with your system
-pip install torch torchvision torchaudio
+pip install mani_skill-nightly torch
 ```
+
+For the majority of MacOS users there is a bit more setup needed for installing the Vulkan driver which is required, please see the [MacOS Installation](./macos_install.md) page for details.
 
 :::{note}
 While state-based simulation does not require any additional dependencies, a GPU with the Vulkan driver installed is required to enable rendering in ManiSkill. See [here](#vulkan) for how to install and configure Vulkan on Ubuntu. Furthermore we currently best support linux machines with NVIDIA GPUs, with limited support on other systems, see the [system requirements](#system-support) section for details.
-
 :::
 
 The rigid-body tasks, powered by SAPIEN, are ready to use after installation. Test your installation:
@@ -36,7 +27,7 @@ The rigid-body tasks, powered by SAPIEN, are ready to use after installation. Te
 python -m mani_skill.examples.demo_random_action
 ```
 
-A docker image is also provided on [Docker Hub](https://hub.docker.com/repository/docker/haosulab/mani-skill/general) called  `haosulab/mani-skill` and its corresponding [Dockerfile](https://github.com/haosulab/ManiSkill/blob/main/docker/Dockerfile).
+A docker image is also provided on [Docker Hub](https://hub.docker.com/repository/docker/maniskill/base) called  `maniskill/base` and its corresponding [Dockerfile](https://github.com/haosulab/ManiSkill/blob/main/docker/Dockerfile).
 
 Once you are done here, you can head over to the [quickstart page](./quickstart.md) to try out some live demos and start to program with ManiSkill.
 
@@ -110,13 +101,13 @@ We currently best support Linux based systems. There is limited support for wind
 | Windows / NVIDIA GPU | ✅      | ❌      | ✅        |
 | Windows / AMD GPU    | ✅      | ❌      | ✅        |
 | WSL / Anything       | ✅      | ❌      | ❌        |
-| MacOS / Anything     | ❌      | ❌      | ❌        |
+| MacOS / Anything     | ✅      | ❌      | ✅        |
 
 ## Troubleshooting
 
-(vulkan)=
-
 ### Vulkan
+
+#### Ubuntu
 
 To install Vulkan on Ubuntu:
 
@@ -127,7 +118,7 @@ sudo apt-get install libvulkan1
 To test your installation of Vulkan:
 
 ```bash
-sudo apt-get install vulkan-utils
+sudo apt-get install vulkan-tools
 vulkaninfo
 ```
 
@@ -214,6 +205,10 @@ ldconfig -p | grep libGLX_nvidia
 ```
 
 If `libGLX_nvidia.so` is not found, then it is likely that you have installed an incorrect driver. To get the right driver on linux, it is recommended to install `nvidia-driver-xxx` (do not use the ones with server in the package name) and to avoid using any other method of installation like a runfile
+
+#### MacOS
+
+See the [MacOS Installation](./macos_install.md) page for more details.
 
 ### Uninstallation
 
