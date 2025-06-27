@@ -138,7 +138,7 @@ class PlaceCubeEnv(BaseEnv):
 
     def _load_scene(self, options: dict):
         self.table_scene = TableSceneBuilder(
-            env=self, robot_init_qpos_noise=self.robot_init_qpos_noise
+            env=self, robot_init_qpos_noise=self.robot_init_qpos_noise, custom_table=True
         )
         self.table_scene.build()
 
