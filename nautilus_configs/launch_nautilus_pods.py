@@ -19,14 +19,9 @@ from enum import Enum
 from typing import Optional, Annotated
 
 class Algorithm(str, Enum):
-    SAC_OLD = "SAC_OLD"
     SAC = "SAC"
-    TD3 = "TD3"
     PPO = "PPO"
-    SAC_LATENT = "SAC_LATENT"
     DUMMY = "DUMMY"
-    ALIGN = "ALIGN"
-    JOINT = "JOINT"
 
 @dataclass
 class NautilusPodConfig:
@@ -35,9 +30,9 @@ class NautilusPodConfig:
     algo: Annotated[Algorithm, 
                     tyro.conf.arg(
                         name="algo", 
-                        help="Algorithm to use (SAC, TD3, PPO, SAC_LATENT, DUMMY, ALIGN, case-sensitive)",
+                        help="Algorithm to use (SAC, PPO, DUMMY, case-sensitive)",
                         aliases=["-a"]
-                    )] = "SAC_LATENT"
+                    )] = "SAC"
     
     robot: Annotated[str, 
                     tyro.conf.arg(
@@ -72,7 +67,7 @@ class NautilusPodConfig:
                         name="branch", 
                         help="Git branch to use for the experiment",
                         aliases=["-b"]
-                    )] = "xemb-transfer"
+                    )] = "main"
     
     num_pods: Annotated[int, 
                         tyro.conf.arg(
@@ -164,74 +159,7 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         'track': True,
     }
     
-    if algo == Algorithm.SAC or algo == Algorithm.TD3 or algo == Algorithm.SAC_LATENT:
-        # Base arguments for SAC/TD3
-        cmd_args = {
-            **wandb_args,
-            'algorithm': algo.value.upper(),
-            'env-id': env_id,
-            'source_robot': robot,
-            'control_mode': 'pd_joint_vel',
-            'seed': str(seed),
-            'num-envs': '128',
-            'training-freq': '128',
-            'num-eval-steps': '100',
-            'eval-freq': '50_000',
-            'total-timesteps': total_timesteps,
-            'wandb-video-freq': '2',
-        }
-        
-        # Override with any extra arguments
-        cmd_args.update(extra_args_dict)
-        
-        # Build the command string
-        args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        main_cmd = f'''echo y | python examples/baselines/x-emb/train_source.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-        
-    elif algo == Algorithm.ALIGN:
-        cmd_args = {
-            **wandb_args,
-            'algorithm': algo.value.upper(),
-            'env-id': env_id,
-            'source_robot': robot.split('_to_')[0],
-            'target_robot': robot.split('_to_')[1],
-            'control_mode': 'pd_joint_vel',
-            'seed': str(seed),
-            'num-eval-envs': '32',
-            'num-eval-steps': '50',
-            'log-freq': '50_000',
-            'eval-freq': '100_000',
-            'alignment_samples': total_timesteps,
-            'wandb-video-freq': '5',
-        }
-        cmd_args.update(extra_args_dict)
-        args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        main_cmd = f'''echo y | python examples/baselines/x-emb/train_align.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-
-    elif algo == Algorithm.JOINT:
-        cmd_args = {
-            **wandb_args,
-            'algorithm': algo.value.upper(),
-            'env-id': env_id,
-            'source_robot': robot.split('_to_')[0],
-            'target_robot': robot.split('_to_')[1],
-            'control_mode': 'pd_joint_vel',
-            'seed': str(seed),
-            'num-envs': '128',
-            'training-freq': '128',
-            'num-eval-steps': '100',
-            'eval-freq': '50_000',
-            'total-timesteps': total_timesteps,
-            'wandb-video-freq': '2',
-        }
-        cmd_args.update(extra_args_dict)
-        args_str = ' '.join([f'--{k} {v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        main_cmd = f'''echo y | python examples/baselines/x-emb/train_joint.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
-
-    elif algo == Algorithm.SAC_OLD:
+    if algo == Algorithm.SAC:
         cmd_args = {
             **wandb_args,
             'env_id': env_id,
@@ -275,9 +203,9 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         
         # Build the command string
         args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
-        main_cmd = f'''echo y | python examples/baselines/ppo/ppo.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log"
-''' 
+        main_cmd = f'''pip install tensordict && echo y | python examples/baselines/ppo/ppo_fast.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log''' 
+    
     elif algo == Algorithm.DUMMY:
         main_cmd = "sleep infinity"
 
