@@ -39,7 +39,24 @@ class Reachy2Static(BaseAgent):
         rest=Keyframe(
             pose=sapien.Pose(),
             qpos=np.zeros(21),
-        )
+        ),
+        right_hand_out=Keyframe(
+            pose=sapien.Pose(),
+            qpos=([
+                -1.6, -1.2,   # r_shoulder_pitch, r_shoulder_roll
+                0,            # neck_roll
+                0, 0,         # r_shoulder_roll, l_shoulder_roll
+                0,            # neck_pitch
+                0, 0,         # r_arm_yaw, l_arm_yaw
+                0,            # neck_yaw
+                0, 0,         # r_elbow_pitch, l_elbow_pitch
+                0, 0,         # r_forearm_yaw, l_forearm_yaw
+                0, 0,         # l_antenna, r_antenna
+                0, 0,         # r_wrist_pitch, l_wrist_pitch
+                0, 0,         # r_wrist_roll, l_wrist_roll
+                -0.35, 1.2,   # r_gripper, l_gripper
+            ]),
+        ),
     )
 
     def __init__(self, *args, **kwargs):
@@ -80,9 +97,9 @@ class Reachy2Static(BaseAgent):
         self.r_ee_link_name = "r_arm_tip"
         self.camera_link_name = "camera_link"
 
-        self.arm_stiffness = 1e3
-        self.arm_damping = 1e2 # 0.1
-        self.arm_force_limit = 100
+        self.arm_stiffness = 1e7
+        self.arm_damping = 1e6 # 0.1
+        self.arm_force_limit = 1e9
 
         self.gripper_stiffness = 1e3
         self.gripper_damping = 1e2 # 0.1
@@ -350,6 +367,7 @@ class Reachy2Static(BaseAgent):
         self.r_tcp: Link = sapien_utils.get_obj_by_name(
             self.robot.get_links(), "r_arm_tip"
         )
+        self.tcp = self.r_tcp
 
         self.head_camera_link: Link = sapien_utils.get_obj_by_name(
             self.robot.get_links(), self.camera_link_name

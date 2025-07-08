@@ -198,6 +198,10 @@ class TableSceneBuilder(SceneBuilder):
             self.ground.set_collision_group_bit(
                 group=2, bit_idx=REACHY_WHEELS_COLLISION_BIT, bit=1
             )
+        elif self.env.robot_uids == "reachy2_static":
+            qpos = self.env.agent.keyframes["right_hand_out"].qpos
+            self.env.agent.reset(qpos)
+            self.env.agent.robot.set_pose(sapien.Pose([-0.522, 0, -0.728]))
         elif self.env.robot_uids == ("panda", "panda"):
             agent: MultiAgent = self.env.agent
             qpos = np.array(
