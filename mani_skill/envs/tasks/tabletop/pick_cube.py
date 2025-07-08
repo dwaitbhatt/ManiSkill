@@ -83,7 +83,7 @@ class PickCubeEnv(BaseEnv):
 
     def _load_scene(self, options: dict):
         self.table_scene = TableSceneBuilder(
-            self, robot_init_qpos_noise=self.robot_init_qpos_noise
+            self, robot_init_qpos_noise=self.robot_init_qpos_noise, custom_table=True
         )
         self.table_scene.build()
         self.cube = actors.build_cube(
