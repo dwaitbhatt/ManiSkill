@@ -67,7 +67,7 @@ class NautilusPodConfig:
                         name="branch", 
                         help="Git branch to use for the experiment",
                         aliases=["-b"]
-                    )] = "main"
+                    )] = "reachy"
     
     num_pods: Annotated[int, 
                         tyro.conf.arg(

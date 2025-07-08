@@ -1,28 +1,28 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: db-maniskill-job-xarm6-tdmpc
+  name: db-maniskill-job-reachy2
 spec:
   template:
     spec:
       containers:
       - name: gpu-container
-        image: dhbhatt/maniskill-experiments:v4.1_tdmpc
+        image: dhbhatt/maniskill-experiments:latest
         command: ["/bin/bash", "-c"]
         args: [
           # "git pull && \
           # python examples/baselines/sac/sac.py \
           #        --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
-          #        --exp_name PlaceCubeMatched3_xarm6_pandagripper_jv_sac \
+          #        --exp_name PlaceCube_reachy2_jv_sac \
           #        --env-id PlaceCube-v1 \
-          #        --robot xarm6_pandagripper \
+          #        --robot reachy2 \
           #        --control_mode pd_joint_vel \
           #        --num-envs 128 \
           #        --training-freq 128 \
           #        --num-eval-steps 100 \
-          #        --eval-freq 100_000 \
-          #        --total-timesteps 10_000_000 \
-          #        --wandb-video-freq 900_000 \
+          #        --eval-freq 50_000 \
+          #        --total-timesteps 2_000_000 \
+          #        --wandb-video-freq 2 \
           #        --track \
           #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
 
@@ -31,9 +31,9 @@ spec:
                   model_size=5 \
                   steps=5_000_000 \
                   seed=1 \
-                  wandb_name=PickCube_xarm6_robotiq_tdmpc2 \
+                  wandb_name=PickCube_reachy2_static_onehand_tdmpc2 \
                   env_id=PickCube-v1 \
-                  robot_uids=xarm6_robotiq \
+                  robot_uids=reachy2_static_onehand \
                   control_mode=pd_joint_vel \
                   env_type=gpu \
                   num_envs=32 \
@@ -45,9 +45,9 @@ spec:
           # "git pull && \
           # python examples/baselines/ppo/ppo.py \
           #         --env_id=PlaceCube-v1 \
-          #         --robot_uids=xarm6_pandagripper \
+          #         --robot_uids=reachy2 \
           #         --control_mode=pd_joint_vel \
-          #         --exp_name=PlaceCubeMatched3_xarm6_pandagripper_jv_ppo \
+          #         --exp_name=PlaceCube_reachy2_jv_ppo \
           #         --num_envs=512 \
           #         --num_eval_envs=8 \
           #         --eval_freq=10 \
@@ -73,11 +73,11 @@ spec:
         resources:
           limits:
             nvidia.com/gpu: "1"
-            memory: "156G"
+            memory: "64G"
             cpu: "32"
           requests:
             nvidia.com/gpu: "1"
-            memory: "128G"
+            memory: "50G"
             cpu: "24"
       affinity:
         # nodeAffinity:
