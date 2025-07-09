@@ -16,6 +16,11 @@ from mani_skill.utils.structs import Pose
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.link import Link
 
+REACHY_ARM_COLLISION_BIT = 28
+"""Collision bit of the reachy hand links"""
+REACHY_HEAD_COLLISION_BIT = 29
+"""Collision bit of the reachy head link"""
+
 
 @register_agent()
 class Reachy2Static(BaseAgent):
@@ -43,7 +48,7 @@ class Reachy2Static(BaseAgent):
         right_hand_out=Keyframe(
             pose=sapien.Pose(),
             qpos=([
-                -1.6, -1.2,   # r_shoulder_pitch, r_shoulder_roll
+                -1.6, -1.3,   # r_shoulder_pitch, l_shoulder_pitch
                 0,            # neck_roll
                 0, 0,         # r_shoulder_roll, l_shoulder_roll
                 0,            # neck_pitch
@@ -376,6 +381,62 @@ class Reachy2Static(BaseAgent):
         self.queries: Dict[
             str, Tuple[physx.PhysxGpuContactPairImpulseQuery, Tuple[int]]
         ] = dict()
+
+        # Arm Kinematic Chain:
+        # torso -> r_shoulder -> r_shoulder_x -> r_upper_arm -> r_forearm -> r_wrist
+        #         -> r_wrist2hand -> r_gripper_thumb -> r_gripper_finger
+        # torso -> l_shoulder -> l_shoulder_x -> l_upper_arm -> l_forearm -> l_wrist
+        #         -> l_wrist2hand -> l_gripper_thumb -> l_gripper_finger
+        self.r_shoulder_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_shoulder"
+        )
+        self.r_upper_arm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_upper_arm"
+        )
+        self.r_wrist_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_wrist"
+        )
+        self.r_gripper_thumb_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "r_gripper_thumb"
+        )
+        # disable all collisions between non-consecutive arm links for which collisions are acceptable
+        for link in [self.r_shoulder_link, self.r_upper_arm_link, self.r_wrist_link, self.r_gripper_thumb_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_ARM_COLLISION_BIT, bit=1
+            )
+
+        # Same as above for the left arm
+        self.l_shoulder_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_shoulder"
+        )
+        self.l_upper_arm_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_upper_arm"
+        )
+        self.l_wrist_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_wrist"
+        )
+        self.l_gripper_thumb_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "l_gripper_thumb"
+        )
+        for link in [self.l_shoulder_link, self.l_upper_arm_link, self.l_wrist_link, self.l_gripper_thumb_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_ARM_COLLISION_BIT, bit=1
+            )
+
+        # Head Kinematic Chain:
+        # torso -> head_x -> head_y -> head_z -> head
+        self.torso_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "torso"
+        )
+        self.head_link: Link = sapien_utils.get_obj_by_name(
+            self.robot.get_links(), "head"
+        )
+
+        # disable collisions between non-consecutive head links for which collisions are acceptable
+        for link in [self.torso_link, self.head_link]:
+            link.set_collision_group_bit(
+                group=2, bit_idx=REACHY_HEAD_COLLISION_BIT, bit=1
+            )
 
     def is_grasping(self, object: Actor, min_force=0.5, max_angle=85):
         """Check if the robot is grasping an object
