@@ -93,7 +93,7 @@ class PickCubeEnv(BaseEnv):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
             xyz = torch.zeros((b, 3))
-            xyz[:, :2] = torch.rand((b, 2)) * 0.2 - 0.1
+            # xyz[:, :2] = torch.rand((b, 2)) * 0.2 - 0.1
             xyz[:, 2] = self.cube_half_size
             qs = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=True)
             self.cube.set_pose(Pose.create_from_pq(xyz, qs))
