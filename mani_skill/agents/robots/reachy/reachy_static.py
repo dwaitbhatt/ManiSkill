@@ -249,13 +249,14 @@ class ReachyStatic(BaseAgent):
         # -------------------------------------------------------------------------- #
         # NOTE(jigu): IssacGym uses large P and D but with force limit
         # However, tune a good force limit to have a good mimic behavior
-        gripper_pd_joint_pos = PDJointPosMimicControllerConfig(
+        gripper_pd_joint_pos = PDJointPosControllerConfig(
             self.gripper_joint_names,
-            -0.01,  # a trick to have force when the object is thin
-            0.05,
+            None,
+            None,
             self.gripper_stiffness,
             self.gripper_damping,
             self.gripper_force_limit,
+            normalize_action=False,
         )
 
         # -------------------------------------------------------------------------- #

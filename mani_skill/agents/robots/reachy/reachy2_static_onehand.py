@@ -196,13 +196,14 @@ class Reachy2StaticOnehand(BaseAgent):
         # -------------------------------------------------------------------------- #
         # NOTE(jigu): IssacGym uses large P and D but with force limit
         # However, tune a good force limit to have a good mimic behavior
-        gripper_pd_joint_pos = PDJointPosMimicControllerConfig(
+        gripper_pd_joint_pos = PDJointPosControllerConfig(
             self.gripper_joint_names,
-            -0.01,  # a trick to have force when the object is thin
-            0.05,
+            None,
+            None,
             self.gripper_stiffness,
             self.gripper_damping,
             self.gripper_force_limit,
+            normalize_action=False,
         )
 
         controller_configs = dict(
@@ -355,30 +356,6 @@ class Reachy2StaticOnehand(BaseAgent):
             min_force (float, optional): Minimum force before the robot is considered to be grasping the object in Newtons. Defaults to 0.5.
             max_angle (int, optional): Maximum angle of contact to consider grasping. Defaults to 85.
         """
-        # Check if the left hand is grasping
-        l_finger_contact_forces = self.scene.get_pairwise_contact_forces(
-            self.l_finger_link, object
-        )
-        l_thumb_contact_forces = self.scene.get_pairwise_contact_forces(
-            self.l_thumb_link, object
-        )
-        l_finger_force = torch.linalg.norm(l_finger_contact_forces, axis=1)
-        l_thumb_force = torch.linalg.norm(l_thumb_contact_forces, axis=1)
-
-        # direction to open the gripper
-        lfdirection = -self.l_finger_link.pose.to_transformation_matrix()[..., :3, 1]
-        ltdirection = self.l_thumb_link.pose.to_transformation_matrix()[..., :3, 1]
-        lfangle = common.compute_angle_between(lfdirection, l_finger_contact_forces)
-        ltangle = common.compute_angle_between(ltdirection, l_thumb_contact_forces)
-        lf_flag = torch.logical_and(
-            l_finger_force >= min_force, torch.rad2deg(lfangle) <= max_angle
-        )
-        lt_flag = torch.logical_and(
-            l_thumb_force >= min_force, torch.rad2deg(ltangle) <= max_angle
-        )
-
-        is_left_grasping = torch.logical_and(lf_flag, lt_flag)
-
         # Check if the right hand is grasping
         r_finger_contact_forces = self.scene.get_pairwise_contact_forces(
             self.r_finger_link, object
@@ -402,7 +379,7 @@ class Reachy2StaticOnehand(BaseAgent):
 
         is_right_grasping = torch.logical_and(rf_flag, rt_flag)
 
-        return torch.logical_or(is_left_grasping, is_right_grasping)
+        return is_right_grasping
 
     def is_static(self, threshold: float = 0.2):
         body_qvel = self.robot.get_qvel()[..., 3:-2]
