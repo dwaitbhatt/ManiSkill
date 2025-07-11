@@ -201,7 +201,7 @@ class TableSceneBuilder(SceneBuilder):
         elif self.env.robot_uids in ["reachy2_static", "reachy2_static_onehand"]:
             qpos = self.env.agent.keyframes["right_hand_out"].qpos
             self.env.agent.reset(qpos)
-            self.env.agent.robot.set_pose(sapien.Pose([-0.62, 0, -0.728]))
+            self.env.agent.robot.set_pose(sapien.Pose([-0.62, 0.19, -0.728]))
         elif self.env.robot_uids == ("panda", "panda"):
             agent: MultiAgent = self.env.agent
             qpos = np.array(
