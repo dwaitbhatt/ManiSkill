@@ -25,7 +25,7 @@ REACHY_HEAD_COLLISION_BIT = 29
 @register_agent()
 class Reachy2StaticOnehand(BaseAgent):
     uid = "reachy2_static_onehand"
-    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/reachy/reachy2_static.urdf"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/reachy/reachy2_static_mod.urdf"
     urdf_config = dict(
         _materials=dict(
             gripper=dict(static_friction=2.0, dynamic_friction=2.0, restitution=0.0)
