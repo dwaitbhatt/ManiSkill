@@ -1,4 +1,4 @@
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Union
 
 import numpy as np
 import sapien
@@ -8,12 +8,17 @@ import mani_skill.envs.utils.randomization as randomization
 from mani_skill.agents.robots import SO100, Fetch, Panda, WidowXAI, XArm6Robotiq
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.tasks.tabletop.pick_cube_cfgs import PICK_CUBE_CONFIGS
-from mani_skill.sensors.camera import CameraConfig
+from mani_skill.sensors.camera import CameraConfig        # Build cubes separately for each parallel environment to enable domain randomization
+
 from mani_skill.utils import sapien_utils
 from mani_skill.utils.building import actors
 from mani_skill.utils.registration import register_env
 from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
+from mani_skill.utils.structs import Actor
+
+from sapien.physx import PhysxRigidBodyComponent
+from sapien.render import RenderBodyComponent
 
 PICK_CUBE_DOC_STRING = """**Task Description:**
 A simple task where the objective is to grasp a red cube with the {robot_id} robot and move it to a target goal position. This is also the *baseline* task to test whether a robot with manipulation
@@ -236,3 +241,52 @@ class PickCubeWidowXAIEnv(PickCubeEnv):
 
 
 PickCubeWidowXAIEnv.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="WidowXAI")
+
+
+@register_env("PickCubeDR-v1", max_episode_steps=50)
+class PickCubeDR(PickCubeEnv):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _load_scene(self, options: dict):
+        '''
+            Custom load_scene where every parallel environment has a different color for the cube.
+        '''
+        self.table_scene = TableSceneBuilder(
+            self, robot_init_qpos_noise=self.robot_init_qpos_noise, custom_table=True
+        )
+        self.table_scene.build()
+        self.goal_site = actors.build_sphere(
+            self.scene,
+            radius=self.goal_thresh,
+            color=[0, 1, 0, 1],
+            name="goal_site",
+            body_type="kinematic",
+            add_collision=False,
+            initial_pose=sapien.Pose(),
+        )
+        self._hidden_objects.append(self.goal_site)
+
+        # Build cubes separately for each parallel environment to enable domain randomization        
+        self._cubes: List[Actor] = []
+        for i in range(self.num_envs):
+            builder = self.scene.create_actor_builder()
+            builder.add_box_collision(half_size=[self.cube_half_size] * 3)
+            builder.add_box_visual(
+                half_size=[self.cube_half_size] * 3, 
+                material=sapien.render.RenderMaterial(
+                    base_color=self._batched_episode_rng[i].uniform(low=0., high=1., size=(3, )).tolist() + [1]
+                )
+            )
+            builder.initial_pose = sapien.Pose(p=[0, 0, self.cube_half_size])
+            builder.set_scene_idxs([i])
+            self._cubes.append(builder.build(name=f"cube_{i}"))
+            self.remove_from_state_dict_registry(self._cubes[-1])  # remove individual cube from state dict
+
+        # Merge all cubes into a single Actor object
+        self.cube = Actor.merge(self._cubes, name="cube")
+        print(f"number of cubes: {len(self._cubes)}")
+        self.add_to_state_dict_registry(self.cube)  # add merged cube to state dict
+
+
+PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="Panda")
