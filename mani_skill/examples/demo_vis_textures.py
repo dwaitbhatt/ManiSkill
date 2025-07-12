@@ -1,6 +1,10 @@
 import signal
 import sys
 
+# Set matplotlib backend before importing pyplot
+import matplotlib
+matplotlib.use('TkAgg')  # or try 'Qt5Agg' if TkAgg doesn't work
+
 from matplotlib import pyplot as plt
 import torch
 
