@@ -332,6 +332,21 @@ class PickCubeDR(PickCubeEnv):
         )
         self._hidden_objects.append(self.goal_site)
 
+    def _reconfigure(self, options=dict()):
+        """Clean up individual actors created for domain randomization to prevent memory leaks during resets."""
+        if hasattr(self, '_cubes'):
+            # Remove individual cubes from the scene
+            for cube in self._cubes:
+                if hasattr(cube, 'entity') and cube.entity is not None:
+                    self.scene.remove_actor(cube)
+            self._cubes.clear()
+        
+        # Clean up table scene builder if it exists
+        if hasattr(self, 'table_scene'):
+            self.table_scene.cleanup()
+
+        super()._reconfigure(options)
+
 PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
 
 

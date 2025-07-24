@@ -94,13 +94,13 @@ class TableSceneBuilder(SceneBuilder):
             self.table_height = 0.91964292762787
             if self.randomize_colors:
                 # Build tables separately for each parallel environment to enable domain randomization        
-                _tables: List[Actor] = []
+                self._tables: List[Actor] = []
                 for i in range(self.env.num_envs):
-                    _tables.append(self._build_custom_table(length=1.52, width=0.76, height=self.table_height, random_i=i))
-                    self.env.remove_from_state_dict_registry(_tables[-1])  # remove individual cube from state dict
+                    self._tables.append(self._build_custom_table(length=1.52, width=0.76, height=self.table_height, random_i=i))
+                    self.env.remove_from_state_dict_registry(self._tables[-1])  # remove individual cube from state dict
 
                 # Merge all tables into a single Actor object
-                self.table = Actor.merge(_tables, name="table")
+                self.table = Actor.merge(self._tables, name="table")
             else:
                 self.table = self._build_custom_table(length=1.52, width=0.76, height=self.table_height)
         else:
@@ -150,6 +150,15 @@ class TableSceneBuilder(SceneBuilder):
             self.scene, floor_width=floor_width, altitude=-self.table_height
         )
         self.scene_objects: List[sapien.Entity] = [self.table, self.ground]
+
+    def cleanup(self):
+        """Clean up individual table actors created for domain randomization to prevent memory leaks."""
+        if hasattr(self, '_tables'):
+            # Remove individual tables from the scene
+            for table in self._tables:
+                if hasattr(table, 'entity') and table.entity is not None:
+                    self.env.scene.remove_actor(table)
+            self._tables.clear()
 
     def initialize(self, env_idx: torch.Tensor):
         # table_height = 0.9196429
