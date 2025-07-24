@@ -350,11 +350,9 @@ class PickCubeDR(PickCubeEnv):
 PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
 
 
-@register_env("PickCubeDiscreteInit-v1", max_episode_steps=50)
-class PickCubeDiscreteInit(PickCubeEnv):
-    def __init__(self, *args, robot_uids="xarm6_robotiq", **kwargs):
-        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=0.0, **kwargs)
-
+class DiscreteInitMixin:
+    """Mixin class that provides discrete initialization for cube positions on a 10x10 grid."""
+    
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
             b = len(env_idx)
@@ -376,40 +374,23 @@ class PickCubeDiscreteInit(PickCubeEnv):
 
             goal_xyz = xyz.clone()
             goal_xyz[:, 2] = xyz[:, 2] + 0.2
+
             self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+
+
+@register_env("PickCubeDiscreteInit-v1", max_episode_steps=50)
+class PickCubeDiscreteInit(DiscreteInitMixin, PickCubeEnv):
+    def __init__(self, *args, robot_uids="xarm6_robotiq", **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=0.0, **kwargs)
 
 
 PickCubeDiscreteInit.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
 
 
 @register_env("PickCubeDRDiscreteInit-v1", max_episode_steps=50)
-class PickCubeDRDiscreteInit(PickCubeDR):
+class PickCubeDRDiscreteInit(DiscreteInitMixin, PickCubeDR):
     def __init__(self, *args, robot_uids="xarm6_robotiq", **kwargs):
         super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=0.0, **kwargs)
 
-    def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
-        with torch.device(self.device):
-            b = len(env_idx)
-            self.table_scene.initialize(env_idx)
-            xyz = torch.zeros((b, 3))
 
-            # Cube position chosen from a 10x10 grid
-            grid_idx = env_idx % 100
-            x_grid = grid_idx // 10
-            y_grid = grid_idx % 10            
-            xyz[:, 0] = torch.linspace(0, 1, 10)[x_grid] * self.cube_spawn_half_size * 2 - self.cube_spawn_half_size
-            xyz[:, 1] = torch.linspace(0, 1, 10)[y_grid] * self.cube_spawn_half_size * 2 - self.cube_spawn_half_size
-            xyz[:, 0] += self.cube_spawn_center[0]
-            xyz[:, 1] += self.cube_spawn_center[1]
-            xyz[:, 2] = self.cube_half_size
- 
-            qs = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=True)
-            self.cube.set_pose(Pose.create_from_pq(xyz, qs))
-
-            goal_xyz = xyz.clone()
-            goal_xyz[:, 2] = xyz[:, 2] + 0.2
-
-            self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
-
-
-PickCubeDiscreteInit.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
+PickCubeDRDiscreteInit.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
