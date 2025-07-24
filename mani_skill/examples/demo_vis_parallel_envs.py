@@ -26,6 +26,7 @@ def parse_args(args=None):
     parser.add_argument("-e", "--env-id", type=str, default="PushCube-v1", help="The environment ID of the task you want to simulate")
     parser.add_argument("-o", "--obs-mode", type=str, default="rgb", help="Can be rgb or rgb+depth, rgb+normal, albedo+depth etc. Which ever image-like textures you want to visualize can be tacked on")
     parser.add_argument("-r", "--robot", type=str, default="panda", help="The robot to use")
+    parser.add_argument("-ne", "--num-eps", type=int, default=10, help="Number of episodes to run")
     parser.add_argument("--shader", default="default", type=str, help="Change shader used for all cameras in the environment for rendering. Default is 'minimal' which is very fast. Can also be 'rt' for ray tracing and generating photo-realistic renders. Can also be 'rt-fast' for a faster but lower quality ray-traced renderer")
     parser.add_argument("-n", "--num-envs", type=int, default=4, help="Number of parallel environments to run and visualize")
     parser.add_argument("-cw", "--cam-width", type=int, help="Override the width of every camera in the environment")
@@ -89,32 +90,37 @@ def main(args):
     
     renderer = visualization.ImageRenderer()
 
-    while True:
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        cam_num = 0
-        imgs = []
-        for env_idx in range(args.num_envs):
-            for cam in cameras_to_show:
-                if cam in obs["sensor_data"]:
-                    for texture in obs["sensor_data"][cam].keys():
-                        if obs["sensor_data"][cam][texture].dtype == torch.uint8:
-                            data = common.to_numpy(obs["sensor_data"][cam][texture][env_idx])
-                            imgs.append(data)
-                        else:
-                            data = common.to_numpy(obs["sensor_data"][cam][texture][env_idx]).astype(np.float32)
-                            # Handle potential division by zero
-                            data_range = data.max() - data.min()
-                            if data_range > 0:
-                                data = data / data_range
+    for episode in range(args.num_eps):
+        while True:
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            cam_num = 0
+            imgs = []
+            for env_idx in range(args.num_envs):
+                for cam in cameras_to_show:
+                    if cam in obs["sensor_data"]:
+                        for texture in obs["sensor_data"][cam].keys():
+                            if obs["sensor_data"][cam][texture].dtype == torch.uint8:
+                                data = common.to_numpy(obs["sensor_data"][cam][texture][env_idx])
+                                imgs.append(data)
                             else:
-                                data = data - data.min()  # Just normalize to [0, 1]
-                            data_rgb = np.zeros((data.shape[0], data.shape[1], 3), dtype=np.uint8)
-                            data_rgb[..., :] = data * 255
-                            imgs.append(data_rgb)
-            cam_num += 1
-        img = visualization.tile_images(imgs, nrows=int(np.sqrt(args.num_envs)))
-        renderer(img)
-
+                                data = common.to_numpy(obs["sensor_data"][cam][texture][env_idx]).astype(np.float32)
+                                # Handle potential division by zero
+                                data_range = data.max() - data.min()
+                                if data_range > 0:
+                                    data = data / data_range
+                                else:
+                                    data = data - data.min()  # Just normalize to [0, 1]
+                                data_rgb = np.zeros((data.shape[0], data.shape[1], 3), dtype=np.uint8)
+                                data_rgb[..., :] = data * 255
+                                imgs.append(data_rgb)
+                cam_num += 1
+            img = visualization.tile_images(imgs, nrows=int(np.sqrt(args.num_envs)))
+            renderer(img)
+            if terminated.any() or truncated.any():
+                print(f"Episode {episode+1}/{args.num_eps} finished")
+                obs, _ = env.reset(seed=args.seed)
+                break
+    
 if __name__ == "__main__":
     main(parse_args()) 

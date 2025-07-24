@@ -46,7 +46,7 @@ class TableSceneBuilder(SceneBuilder):
         
         # Tabletop
         if random_i >= 0:
-            tabletop_material = sapien.render.RenderMaterial(base_color=self.env._batched_episode_rng[random_i].uniform(low=0., high=1., size=(3, )).tolist() + [1])
+            tabletop_material = sapien.render.RenderMaterial(base_color=self.env._batched_episode_rng[random_i].uniform(low=0., high=0.5, size=(3, )).tolist() + [1])
             builder.set_scene_idxs([random_i])
         else:
             # default: black tabletop
@@ -71,7 +71,7 @@ class TableSceneBuilder(SceneBuilder):
         ]
         
         if random_i >= 0:
-            leg_material = sapien.render.RenderMaterial(base_color=self.env._batched_episode_rng[random_i].uniform(low=0., high=1., size=(3, )).tolist() + [1])
+            leg_material = sapien.render.RenderMaterial(base_color=self.env._batched_episode_rng[random_i].uniform(low=0.5, high=1., size=(3, )).tolist() + [1])
         else:
             leg_material = sapien.render.RenderMaterial(base_color=[0.9, 0.9, 0.9, 1.0])
         for leg_pos in leg_positions:

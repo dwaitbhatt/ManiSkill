@@ -245,8 +245,8 @@ PickCubeWidowXAIEnv.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="WidowXAI")
 
 @register_env("PickCubeDR-v1", max_episode_steps=50)
 class PickCubeDR(PickCubeEnv):
-    def __init__(self, *args,  robot_uids="xarm6_robotiq",**kwargs):
-        super().__init__(*args, robot_uids=robot_uids, reconfiguration_freq=5, **kwargs)
+    def __init__(self, *args,  robot_uids="xarm6_robotiq", robot_init_qpos_noise=0.02, **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=robot_init_qpos_noise, reconfiguration_freq=1, **kwargs)
 
     def _load_agent(self, options: dict):
         super()._load_agent(options, initial_agent_poses=sapien.Pose(), build_separate=True)
@@ -254,7 +254,7 @@ class PickCubeDR(PickCubeEnv):
     def _load_lighting(self, options: dict):
         for scene in self.scene.sub_scenes:
             scene.ambient_light = [np.random.uniform(0.2, 0.6), np.random.uniform(0.2, 0.6), np.random.uniform(0.2, 0.6)]
-            scene.add_directional_light([1, 1, -1], [1, 1, 1], shadow=True, shadow_scale=5, shadow_map_size=4096)
+            scene.add_directional_light(np.random.uniform(-1, 1, 3), [1, 1, 1], shadow=True, shadow_scale=5, shadow_map_size=4096)
             scene.add_directional_light([0, 0, -1], [1, 1, 1])
 
     def _load_scene(self, options: dict):
@@ -286,7 +286,6 @@ class PickCubeDR(PickCubeEnv):
 
         # Merge all cubes into a single Actor object
         self.cube = Actor.merge(self._cubes, name="cube")
-        print(f"number of cubes: {len(self._cubes)}")
         self.add_to_state_dict_registry(self.cube)  # add merged cube to state dict
 
         ### Agent randomization
@@ -339,17 +338,52 @@ PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
 @register_env("PickCubeDiscreteInit-v1", max_episode_steps=50)
 class PickCubeDiscreteInit(PickCubeEnv):
     def __init__(self, *args, robot_uids="xarm6_robotiq", **kwargs):
-        super().__init__(*args, robot_uids=robot_uids, **kwargs)
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=0.0, **kwargs)
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
             xyz = torch.zeros((b, 3))
-            xyz[:, :2] = torch.from_numpy(
-                np.random.choice(np.linspace(0, 1, 11), size=(b, 2)) * self.cube_spawn_half_size * 2
-                - self.cube_spawn_half_size
-            )
+            
+            # Cube position chosen from a 10x10 grid
+            grid_idx = env_idx % 100
+            x_grid = grid_idx // 10
+            y_grid = grid_idx % 10
+            xyz[:, 0] = torch.linspace(0, 1, 10)[x_grid] * self.cube_spawn_half_size * 2 - self.cube_spawn_half_size
+            xyz[:, 1] = torch.linspace(0, 1, 10)[y_grid] * self.cube_spawn_half_size * 2 - self.cube_spawn_half_size
+            xyz[:, 0] += self.cube_spawn_center[0]
+            xyz[:, 1] += self.cube_spawn_center[1]
+            xyz[:, 2] = self.cube_half_size
+ 
+            qs = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=True)
+            self.cube.set_pose(Pose.create_from_pq(xyz, qs))
+
+            goal_xyz = xyz.clone()
+            goal_xyz[:, 2] = xyz[:, 2] + 0.2
+            self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+
+
+PickCubeDiscreteInit.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
+
+
+@register_env("PickCubeDRDiscreteInit-v1", max_episode_steps=50)
+class PickCubeDRDiscreteInit(PickCubeDR):
+    def __init__(self, *args, robot_uids="xarm6_robotiq", **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, robot_init_qpos_noise=0.0, **kwargs)
+
+    def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
+        with torch.device(self.device):
+            b = len(env_idx)
+            self.table_scene.initialize(env_idx)
+            xyz = torch.zeros((b, 3))
+
+            # Cube position chosen from a 10x10 grid
+            grid_idx = env_idx % 100
+            x_grid = grid_idx // 10
+            y_grid = grid_idx % 10            
+            xyz[:, 0] = torch.linspace(0, 1, 10)[x_grid] * self.cube_spawn_half_size * 2 - self.cube_spawn_half_size
+            xyz[:, 1] = torch.linspace(0, 1, 10)[y_grid] * self.cube_spawn_half_size * 2 - self.cube_spawn_half_size
             xyz[:, 0] += self.cube_spawn_center[0]
             xyz[:, 1] += self.cube_spawn_center[1]
             xyz[:, 2] = self.cube_half_size
