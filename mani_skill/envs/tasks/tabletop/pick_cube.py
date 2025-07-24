@@ -83,8 +83,8 @@ class PickCubeEnv(BaseEnv):
         )
         return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
 
-    def _load_agent(self, options: dict):
-        super()._load_agent(options, sapien.Pose(p=[-0.615, 0, 0]))
+    def _load_agent(self, options: dict, initial_agent_poses = sapien.Pose(p=[-0.615, 0, 0]), build_separate: bool = False):
+        super()._load_agent(options, initial_agent_poses, build_separate)
 
     def _load_scene(self, options: dict):
         self.table_scene = TableSceneBuilder(
@@ -246,28 +246,29 @@ PickCubeWidowXAIEnv.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="WidowXAI")
 @register_env("PickCubeDR-v1", max_episode_steps=50)
 class PickCubeDR(PickCubeEnv):
     def __init__(self, *args,  robot_uids="xarm6_robotiq",**kwargs):
-        super().__init__(*args, robot_uids=robot_uids, **kwargs)
+        super().__init__(*args, robot_uids=robot_uids, reconfiguration_freq=5, **kwargs)
+
+    def _load_agent(self, options: dict):
+        super()._load_agent(options, initial_agent_poses=sapien.Pose(), build_separate=True)
+
+    def _load_lighting(self, options: dict):
+        for scene in self.scene.sub_scenes:
+            scene.ambient_light = [np.random.uniform(0.2, 0.6), np.random.uniform(0.2, 0.6), np.random.uniform(0.2, 0.6)]
+            scene.add_directional_light([1, 1, -1], [1, 1, 1], shadow=True, shadow_scale=5, shadow_map_size=4096)
+            scene.add_directional_light([0, 0, -1], [1, 1, 1])
 
     def _load_scene(self, options: dict):
         '''
             Custom load_scene where every parallel environment has a different color for the cube.
         '''
+        ### Table randomization, handled in TableSceneBuilder
         self.table_scene = TableSceneBuilder(
-            self, robot_init_qpos_noise=self.robot_init_qpos_noise, custom_table=True
+            self, robot_init_qpos_noise=self.robot_init_qpos_noise, 
+            custom_table=True, randomize_colors=True
         )
         self.table_scene.build()
-        self.goal_site = actors.build_sphere(
-            self.scene,
-            radius=self.goal_thresh,
-            color=[0, 1, 0, 1],
-            name="goal_site",
-            body_type="kinematic",
-            add_collision=False,
-            initial_pose=sapien.Pose(),
-        )
-        self._hidden_objects.append(self.goal_site)
 
-        # Build cubes separately for each parallel environment to enable domain randomization        
+        ### Cube randomization: Build cubes separately for each parallel environment to enable domain randomization        
         self._cubes: List[Actor] = []
         for i in range(self.num_envs):
             builder = self.scene.create_actor_builder()
@@ -288,6 +289,49 @@ class PickCubeDR(PickCubeEnv):
         print(f"number of cubes: {len(self._cubes)}")
         self.add_to_state_dict_registry(self.cube)  # add merged cube to state dict
 
+        ### Agent randomization
+        for link in self.agent.robot.links:
+            for i, obj in enumerate(link._objs):
+                # modify the i-th object which is in parallel environment i
+                
+                # modifying physical properties e.g. randomizing mass from 0.1 to 1kg
+                rigid_body_component: PhysxRigidBodyComponent = obj.entity.find_component_by_type(PhysxRigidBodyComponent)
+                if rigid_body_component is not None:
+                    # note the use of _batched_episode_rng instead of torch.rand. _batched_episode_rng helps ensure reproducibility in parallel environments.
+                    rigid_body_component.mass = self._batched_episode_rng[i].uniform(low=0.1, high=1)
+                
+                # modifying per collision shape properties such as friction values
+                for shape in obj.collision_shapes:
+                    shape.physical_material.dynamic_friction = self._batched_episode_rng[i].uniform(low=0.1, high=0.3)
+                    shape.physical_material.static_friction = self._batched_episode_rng[i].uniform(low=0.1, high=0.3)
+                    shape.physical_material.restitution = self._batched_episode_rng[i].uniform(low=0.1, high=0.3)
+
+                render_body_component: RenderBodyComponent = obj.entity.find_component_by_type(RenderBodyComponent)
+                if render_body_component is not None:
+                    for render_shape in render_body_component.render_shapes:
+                        for part in render_shape.parts:
+                            # you can change color, use texture files etc.
+                            part.material.set_base_color(self._batched_episode_rng[i].uniform(low=0., high=1., size=(3, )).tolist() + [1])
+                            # note that textures must use the sapien.render.RenderTexture2D 
+                            # object which allows passing a texture image file path
+                            part.material.set_base_color_texture(None)
+                            part.material.set_normal_texture(None)
+                            part.material.set_emission_texture(None)
+                            part.material.set_transmission_texture(None)
+                            part.material.set_metallic_texture(None)
+                            part.material.set_roughness_texture(None)
+
+        ### Non-randomized objects
+        self.goal_site = actors.build_sphere(
+            self.scene,
+            radius=self.goal_thresh,
+            color=[0, 1, 0, 1],
+            name="goal_site",
+            body_type="kinematic",
+            add_collision=False,
+            initial_pose=sapien.Pose(),
+        )
+        self._hidden_objects.append(self.goal_site)
 
 PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
 

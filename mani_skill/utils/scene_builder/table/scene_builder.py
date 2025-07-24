@@ -12,17 +12,19 @@ from mani_skill.agents.multi_agent import MultiAgent
 from mani_skill.agents.robots.fetch import FETCH_WHEELS_COLLISION_BIT
 from mani_skill.utils.building.ground import build_ground
 from mani_skill.utils.scene_builder import SceneBuilder
+from mani_skill.utils.structs import Actor
 
 
 class TableSceneBuilder(SceneBuilder):
     """A simple scene builder that adds a table to the scene such that the height of the table is at 0, and
     gives reasonable initial poses for robots."""
 
-    def __init__(self, env, robot_init_qpos_noise=0.02, custom_table=False):
+    def __init__(self, env, robot_init_qpos_noise=0.02, custom_table=False, randomize_colors: bool = False):
         super().__init__(env, robot_init_qpos_noise)
         self.custom_table = custom_table
+        self.randomize_colors = randomize_colors
 
-    def _build_custom_table(self, length: float, width: float, height: float):
+    def _build_custom_table(self, length: float, width: float, height: float, random_i: int = -1):
         """
         Build a custom table with specified dimensions.
         
@@ -42,8 +44,13 @@ class TableSceneBuilder(SceneBuilder):
         table_pose = sapien.Pose(p=[0, 0, height/2])  # center of the table
         builder.add_box_collision(table_pose, table_half_size)
         
-        # Tabletop (black)
-        tabletop_material = sapien.render.RenderMaterial(base_color=[0.1, 0.1, 0.1, 1.0])
+        # Tabletop
+        if random_i >= 0:
+            tabletop_material = sapien.render.RenderMaterial(base_color=self.env._batched_episode_rng[random_i].uniform(low=0., high=1., size=(3, )).tolist() + [1])
+            builder.set_scene_idxs([random_i])
+        else:
+            # default: black tabletop
+            tabletop_material = sapien.render.RenderMaterial(base_color=[0.1, 0.1, 0.1, 1.0])
         tabletop_thickness = 0.05
         builder.add_box_visual(
             pose=sapien.Pose(p=[0, 0, height - tabletop_thickness/2]),
@@ -51,8 +58,7 @@ class TableSceneBuilder(SceneBuilder):
             material=tabletop_material
         )
         
-        # Table legs (light gray)
-        leg_material = sapien.render.RenderMaterial(base_color=[0.9, 0.9, 0.9, 1.0])
+        # Table legs
         leg_height = height - tabletop_thickness/2
         leg_margin = 0.03  # margin from corners
         leg_size = 0.05  # square legs
@@ -64,21 +70,39 @@ class TableSceneBuilder(SceneBuilder):
             [-width/2 + leg_margin, -length/2 + leg_margin, leg_height/2], # back left
         ]
         
+        if random_i >= 0:
+            leg_material = sapien.render.RenderMaterial(base_color=self.env._batched_episode_rng[random_i].uniform(low=0., high=1., size=(3, )).tolist() + [1])
+        else:
+            leg_material = sapien.render.RenderMaterial(base_color=[0.9, 0.9, 0.9, 1.0])
         for leg_pos in leg_positions:
             builder.add_box_visual(
                 pose=sapien.Pose(p=leg_pos),
                 half_size=[leg_size/2, leg_size/2, leg_height/2],
                 material=leg_material
             )
-        
+        builder.initial_pose = sapien.Pose(p=[0, 0, -height])
         # Build the final table actor
-        return builder.build_kinematic(name="table-custom")
+        if random_i >= 0:
+            table_actor = builder.build_kinematic(name=f"table-custom-{random_i}")
+        else:
+            table_actor = builder.build_kinematic(name="table-custom")
+        return table_actor
 
     def build(self):
         if self.custom_table:
             # Use custom table with specified dimensions - height of the glb table, length and width matching real table
             self.table_height = 0.91964292762787
-            self.table = self._build_custom_table(length=1.52, width=0.76, height=self.table_height)
+            if self.randomize_colors:
+                # Build tables separately for each parallel environment to enable domain randomization        
+                _tables: List[Actor] = []
+                for i in range(self.env.num_envs):
+                    _tables.append(self._build_custom_table(length=1.52, width=0.76, height=self.table_height, random_i=i))
+                    self.env.remove_from_state_dict_registry(_tables[-1])  # remove individual cube from state dict
+
+                # Merge all tables into a single Actor object
+                self.table = Actor.merge(_tables, name="table")
+            else:
+                self.table = self._build_custom_table(length=1.52, width=0.76, height=self.table_height)
         else:
             # Use default GLB table
             builder = self.scene.create_actor_builder()
