@@ -245,8 +245,8 @@ PickCubeWidowXAIEnv.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="WidowXAI")
 
 @register_env("PickCubeDR-v1", max_episode_steps=50)
 class PickCubeDR(PickCubeEnv):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args,  robot_uids="xarm6_robotiq",**kwargs):
+        super().__init__(*args, robot_uids=robot_uids, **kwargs)
 
     def _load_scene(self, options: dict):
         '''
@@ -289,4 +289,34 @@ class PickCubeDR(PickCubeEnv):
         self.add_to_state_dict_registry(self.cube)  # add merged cube to state dict
 
 
-PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="Panda")
+PickCubeDR.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
+
+
+@register_env("PickCubeDiscreteInit-v1", max_episode_steps=50)
+class PickCubeDiscreteInit(PickCubeEnv):
+    def __init__(self, *args, robot_uids="xarm6_robotiq", **kwargs):
+        super().__init__(*args, robot_uids=robot_uids, **kwargs)
+
+    def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
+        with torch.device(self.device):
+            b = len(env_idx)
+            self.table_scene.initialize(env_idx)
+            xyz = torch.zeros((b, 3))
+            xyz[:, :2] = torch.from_numpy(
+                np.random.choice(np.linspace(0, 1, 11), size=(b, 2)) * self.cube_spawn_half_size * 2
+                - self.cube_spawn_half_size
+            )
+            xyz[:, 0] += self.cube_spawn_center[0]
+            xyz[:, 1] += self.cube_spawn_center[1]
+            xyz[:, 2] = self.cube_half_size
+ 
+            qs = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=True)
+            self.cube.set_pose(Pose.create_from_pq(xyz, qs))
+
+            goal_xyz = xyz.clone()
+            goal_xyz[:, 2] = xyz[:, 2] + 0.2
+
+            self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
+
+
+PickCubeDiscreteInit.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="xarm6_robotiq")
