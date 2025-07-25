@@ -1,0 +1,155 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-maniskill-job-xarm6-bcrgbd
+spec:
+  template:
+    spec:
+      containers:
+      - name: gpu-container
+        image: dhbhatt/maniskill-experiments:latest
+        command: ["/bin/bash", "-c"]
+        args: [
+          # "git pull && \
+          # python examples/baselines/sac/sac.py \
+          #        --wandb-entity ucsd_erl --wandb-project-name maniskill_experiments \
+          #        --exp_name PlaceCube_xarm6_robotiq_jv_sac \
+          #        --env-id PlaceCube-v1 \
+          #        --robot xarm6_robotiq \
+          #        --control_mode pd_joint_vel \
+          #        --num-envs 128 \
+          #        --training-freq 128 \
+          #        --num-eval-steps 100 \
+          #        --eval-freq 50_000 \
+          #        --total-timesteps 2_000_000 \
+          #        --wandb-video-freq 2 \
+          #        --track \
+          #   > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-sac.log"
+
+          # "git stash && git pull && \
+          # echo y | python examples/baselines/tdmpc2/train.py \
+          #         model_size=5 \
+          #         steps=5_000_000 \
+          #         seed=1 \
+          #         wandb_name=PlaceCube_xarm6_robotiq_tdmpc2 \
+          #         env_id=PlaceCube-v1 \
+          #         robot_uids=xarm6_robotiq \
+          #         control_mode=pd_joint_vel \
+          #         env_type=gpu \
+          #         num_envs=32 \
+          #         obs=state \ 
+          #         save_video_local=true \
+          #         wandb=true \
+          #     > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-tdmpc.log"
+
+          # "git pull && \
+          # python examples/baselines/ppo/ppo.py \
+          #         --env_id=PlaceCube-v1 \
+          #         --robot_uids=xarm6_robotiq \
+          #         --control_mode=pd_joint_vel \
+          #         --exp_name=PlaceCube_xarm6_robotiq_jv_ppo \
+          #         --num_envs=512 \
+          #         --num_eval_envs=8 \
+          #         --eval_freq=10 \
+          #         --total_timesteps=100_000_000 \
+          #         --num_steps=50 \
+          #         --num_minibatches=32 \
+          #         --num_eval_steps=50 \
+          #         --gamma=0.8 \
+          #         --update_epochs=4 \
+          #         --track \
+          #         --wandb_video_freq=50 \
+          #     > /pers_vol/dwait/logs/$(date +%Y-%m-%d_%H-%M-%S)-ppo.log"
+
+          "
+          git fetch origin main && git reset --hard origin/main && \
+          python -m mani_skill.examples.motionplanning.xarm6.run --env-id PlaceCube-v1 --traj-name=\"trajectory\" -n 100 --only-count-success && \
+          python -m mani_skill.trajectory.replay_trajectory \
+            --traj-path demos/PlaceCube-v1/motionplanning/trajectory.h5 \
+            --use-first-env-state -c pd_joint_vel -o rgbd \
+            --save-traj --num-envs 8 -b cpu && \
+          export CUBLAS_WORKSPACE_CONFIG=:4096:8 && \
+          python examples/baselines/bc/bc_rgbd.py --env-id \"PlaceCube-v1\" --robot \"xarm6_robotiq\" \
+            --demo-path demos/PlaceCube-v1/motionplanning/trajectory.rgbd.pd_joint_vel.physx_cpu.h5 \
+            --control-mode \"pd_joint_vel\" --sim-backend \"gpu\" \
+            --max-episode-steps 1000 --total-iters 1000000 --batch-size 128 \
+            --num_eval_envs 8 --num-eval-episodes 8 \
+            --track --wandb_project_name \"maniskill_experiments\" --wandb_entity \"ucsd_erl\"
+          "
+        ]
+        env:
+        - name: WANDB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wandb-secret
+              key: api-key
+        volumeMounts:
+        - mountPath: /pers_vol
+          name: db-cephfs-volume
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+            memory: "64G"
+            cpu: "32"
+          requests:
+            nvidia.com/gpu: "1"
+            memory: "50G"
+            cpu: "24"
+      affinity:
+        # nodeAffinity:
+        # nodeSelectorTerms:
+        # - matchExpressions:
+        #   - key: nvidia.com/gpu.product
+        #     operator: In
+        #     values:
+        #     - "NVIDIA-A100-80GB-PCIe"
+        #     - "NVIDIA-A100-SXM4-80GB"      
+        #     - "NVIDIA-GeForce-RTX-4090"
+        #     - "NVIDIA-GeForce-RTX-3090"
+        #     - "NVIDIA-A40"
+        #     - "NVIDIA-A10"
+        #     - "Tesla-V100-SXM2-32GB"
+        #     - "NVIDIA_TITAN_RTX"
+        #     - "NVIDIA-RTX-A6000"
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - "ry-gpu-10.sdsc.optiputer.net"
+                - "k8s-gpu-03.sdsc.optiputer.net"
+          - weight: 80
+            preference:
+              matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - "NVIDIA-A100-80GB-PCIe"
+                - "NVIDIA-A100-SXM4-80GB"      
+                - "NVIDIA-GeForce-RTX-4090"
+                - "NVIDIA-GeForce-RTX-3090"
+          - weight: 15
+            preference:
+              matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - "NVIDIA-A40"
+                - "NVIDIA-A10"
+                - "Tesla-V100-SXM2-32GB"
+          - weight: 5
+            preference:
+              matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - "NVIDIA_TITAN_RTX"
+                - "NVIDIA-RTX-A6000"
+      restartPolicy: Never
+      volumes:
+        - name: db-cephfs-volume
+          persistentVolumeClaim:
+            claimName: db-cephfs-volume
