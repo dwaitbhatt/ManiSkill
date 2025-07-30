@@ -1,4 +1,3 @@
-
 from collections import defaultdict
 from dataclasses import dataclass
 import os
@@ -33,8 +32,8 @@ import mani_skill.envs
 class Args:
     exp_name: Optional[str] = None
     """the name of this experiment"""
-    seed: int = 1
-    """seed of the experiment"""
+    # seed: int = 1
+    # """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
@@ -115,7 +114,7 @@ class Args:
     """Entropy regularization coefficient."""
     training_freq: int = 64
     """training frequency (in steps)"""
-    utd: float = 0.5
+    utd: float = 1
     """update to data ratio"""
     bootstrap_at_done: str = "always"
     """the bootstrap method to use when a done signal is received. Can be 'always' or 'never'"""
@@ -150,11 +149,16 @@ class Args:
     algo_ibrl: bool = False
     """if false, use TD3, if true, use IBRL"""
 
+    #jsrl
+    algo_jsrl: bool = False
+    """jsrl algo trigger"""
+
     #training sample para, all the prob is the env sample, for sigmoid function
     final_p: float = 0.99
     start_p: float = 0.2
-    sample_mode: str = "all"
-    """can choose all, env or mix sample mode, mix sample mode is using the sigmoid function so you have to do final_p and start_p things"""
+
+    #sample tag
+    sample_mode_original: bool = False
 
 @dataclass
 class ReplayBufferSample:
@@ -192,7 +196,6 @@ class ReplayBuffer:
         self.demo_rewards = torch.zeros((self.demo_per_env_buffer_size, self.num_envs)).to(storage_device)
         self.demo_dones = torch.zeros((self.demo_per_env_buffer_size, self.num_envs)).to(storage_device)
         self.demo_sources = torch.zeros((self.demo_per_env_buffer_size, self.num_envs), dtype=torch.uint8).to(storage_device)
-        
 
     def clean_samples(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor):
         # Find row indices where any of the tensors are nan or too large
@@ -208,7 +211,7 @@ class ReplayBuffer:
             reward[nan_or_large_indices] = 0
             done[nan_or_large_indices] = 0
         return obs, next_obs, action, reward, done
-
+    
     def add(self, obs: torch.Tensor, next_obs: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, done: torch.Tensor, sources:torch.Tensor):
         if self.storage_device == torch.device("cpu"):
             obs = obs.cpu()
@@ -217,32 +220,46 @@ class ReplayBuffer:
             reward = reward.cpu()
             done = done.cpu()
 
+
         obs, next_obs, action, reward, done = self.clean_samples(obs, next_obs, action, reward, done)
 
-        if sources != 0:
-            self.demo_obs[self.demo_pos] = obs
-            self.demo_next_obs[self.demo_pos] = next_obs
-            self.demo_actions[self.demo_pos] = action
-            self.demo_rewards[self.demo_pos] = reward
-            self.demo_dones[self.demo_pos] = done
-            self.demo_sources[self.demo_pos] = torch.tensor(sources, dtype=torch.uint8, device=self.storage_device)
-
-            self.demo_pos += 1
-            if self.demo_pos == self.demo_per_env_buffer_size:
-                self.demo_full = True
-                self.demo_pos = 0
-        else:
+        if args.sample_mode_original == True:
             self.obs[self.pos] = obs
             self.next_obs[self.pos] = next_obs
             self.actions[self.pos] = action
             self.rewards[self.pos] = reward
             self.dones[self.pos] = done
-            self.sources[self.pos] = torch.tensor(sources, dtype=torch.uint8, device=self.storage_device)
+            self.sources[self.pos]  = torch.tensor(sources, dtype=torch.uint8, device=self.storage_device)
 
             self.pos += 1
             if self.pos == self.per_env_buffer_size:
                 self.full = True
                 self.pos = 0
+        else:
+            if sources != 0:
+                self.demo_obs[self.demo_pos] = obs
+                self.demo_next_obs[self.demo_pos] = next_obs
+                self.demo_actions[self.demo_pos] = action
+                self.demo_rewards[self.demo_pos] = reward
+                self.demo_dones[self.demo_pos] = done
+                self.demo_sources[self.demo_pos] = torch.tensor(sources, dtype=torch.uint8, device=self.storage_device)
+
+                self.demo_pos += 1
+                if self.demo_pos == self.demo_per_env_buffer_size:
+                    self.demo_full = True
+                    self.demo_pos = 0
+            else:
+                self.obs[self.pos] = obs
+                self.next_obs[self.pos] = next_obs
+                self.actions[self.pos] = action
+                self.rewards[self.pos] = reward
+                self.dones[self.pos] = done
+                self.sources[self.pos] = torch.tensor(sources, dtype=torch.uint8, device=self.storage_device)
+
+                self.pos += 1
+                if self.pos == self.per_env_buffer_size:
+                    self.full = True
+                    self.pos = 0
 
     def sigmoid_function_prob(self, current_step: int, total_steps: int, start_p: float, final_p: float):
         # Handle edge case where start_p == final_p
@@ -260,90 +277,44 @@ class ReplayBuffer:
         logit = beta * current_step + logit_start
         return 1.0 / (1.0 + math.exp(-logit))
 
-    def sample(self, batch_size: int, sample_mode: str, current_step: Optional[int] = None, total_steps: Optional[int] = None, start_p: Optional[float] = None, final_p: Optional[float] = None) -> ReplayBufferSample:
-        """
-        Modes:
-          - 'env': pure environment replay (source=0).
-          - 'all': uniform over both env+demo as one pool.
-          - 'mix': mix env/demo via sigmoid schedule.
-        """
-        if sample_mode == 'env':
-            return self._sample_from_buffer(batch_size, buffer='env')
+    def sample(self, batch_size: int, current_step: Optional[int] = None, total_steps: Optional[int] = None, start_p: Optional[float] = None, final_p: Optional[float] = None) -> ReplayBufferSample:
+        if args.sample_mode_original == True:
+            if self.full:
+                batch_inds = torch.randint(0, self.per_env_buffer_size, size=(batch_size, ))
+            else:
+                batch_inds = torch.randint(0, self.pos, size=(batch_size, ))
+            env_inds = torch.randint(0, self.num_envs, size=(batch_size, ))
+            return ReplayBufferSample(
+                obs=self.obs[batch_inds, env_inds].to(self.sample_device),
+                next_obs=self.next_obs[batch_inds, env_inds].to(self.sample_device),
+                actions=self.actions[batch_inds, env_inds].to(self.sample_device),
+                rewards=self.rewards[batch_inds, env_inds].to(self.sample_device),
+                dones=self.dones[batch_inds, env_inds].to(self.sample_device),
+                sources  = self.sources[batch_inds, env_inds].to(self.sample_device)
+            )
+        else: 
+            assert None not in (current_step, total_steps, start_p, final_p), \
+                "Must pass (current_step, total_steps, start_p, final_p) in 'mix' mode"
+            p_env = self.sigmoid_function_prob(current_step, total_steps, start_p, final_p) #type: ignore
+            k_env = int(torch.distributions.Binomial(batch_size, p_env).sample().long())
 
-        if sample_mode == 'all':
-            # total flat slots
-            env_slots = (self.per_env_buffer_size if self.full else self.pos) * self.num_envs
-            demo_slots = (self.demo_per_env_buffer_size if self.demo_full else self.demo_pos) * self.num_envs
-            total = env_slots + demo_slots
-            if total == 0:
-                raise RuntimeError("No samples in either buffer yet")
+            # if demo buffer is empty, fallback to env
+            if (self.demo_pos == 0 and not self.demo_full):
+                return self._sample_from_buffer(batch_size, buffer='env')
 
-            flat_idxs = torch.randint(0, total, (batch_size,), device=self.storage_device)
-            env_mask = flat_idxs < env_slots
-            demo_mask = ~env_mask
+            # draw k_env env samples and rest demo samples
+            env_batch  = self._sample_from_buffer(k_env,              buffer='env')
+            demo_batch = self._sample_from_buffer(batch_size - k_env, buffer='demo')
 
-            # placeholders
-            obs      = torch.empty((batch_size,) + self.obs.shape[2:],     device=self.sample_device)
-            next_obs = torch.empty_like(obs)
-            actions  = torch.empty((batch_size,) + self.actions.shape[2:], device=self.sample_device)
-            rewards  = torch.empty((batch_size,),                          device=self.sample_device)
-            dones    = torch.empty((batch_size,),                          device=self.sample_device)
-            sources  = torch.empty((batch_size,), dtype=torch.uint8,       device=self.sample_device)
-
-            def unpack(flat):
-                t = flat // self.num_envs
-                e = flat %  self.num_envs
-                return t, e
-
-            # fill env
-            if env_mask.any():
-                e_flat = flat_idxs[env_mask]
-                t_idxs, e_idxs = unpack(e_flat)
-                obs[env_mask]      = self.obs[t_idxs, e_idxs].to(self.sample_device)
-                next_obs[env_mask] = self.next_obs[t_idxs, e_idxs].to(self.sample_device)
-                actions[env_mask]  = self.actions[t_idxs, e_idxs].to(self.sample_device)
-                rewards[env_mask]  = self.rewards[t_idxs, e_idxs].to(self.sample_device)
-                dones[env_mask]    = self.dones[t_idxs, e_idxs].to(self.sample_device)
-                sources[env_mask]  = 0
-
-            # fill demo
-            if demo_mask.any():
-                d_flat = flat_idxs[demo_mask] - env_slots
-                t_idxs, e_idxs = unpack(d_flat)
-                obs[demo_mask]      = self.demo_obs[t_idxs, e_idxs].to(self.sample_device)
-                next_obs[demo_mask] = self.demo_next_obs[t_idxs, e_idxs].to(self.sample_device)
-                actions[demo_mask]  = self.demo_actions[t_idxs, e_idxs].to(self.sample_device)
-                rewards[demo_mask]  = self.demo_rewards[t_idxs, e_idxs].to(self.sample_device)
-                dones[demo_mask]    = self.demo_dones[t_idxs, e_idxs].to(self.sample_device)
-                sources[demo_mask]  = self.demo_sources[t_idxs, e_idxs].to(self.sample_device)
+            # concatenate
+            obs      = torch.cat([env_batch.obs,      demo_batch.obs],      dim=0)
+            next_obs = torch.cat([env_batch.next_obs, demo_batch.next_obs], dim=0)
+            actions  = torch.cat([env_batch.actions,  demo_batch.actions],  dim=0)
+            rewards  = torch.cat([env_batch.rewards,  demo_batch.rewards],  dim=0)
+            dones    = torch.cat([env_batch.dones,    demo_batch.dones],    dim=0)
+            sources  = torch.cat([env_batch.sources,  demo_batch.sources],  dim=0)
 
             return ReplayBufferSample(obs, next_obs, actions, rewards, dones, sources)
-
-        # 3) MIX via sigmoid
-        # require scheduling args
-        assert None not in (current_step, total_steps, start_p, final_p), \
-            "Must pass (current_step, total_steps, start_p, final_p) in 'mix' mode"
-        p_env = self.sigmoid_function_prob(current_step, total_steps, start_p, final_p) #type: ignore
-        k_env = int(torch.distributions.Binomial(batch_size, p_env).sample().long())
-
-        # if demo buffer is empty, fallback to env
-        if (self.demo_pos == 0 and not self.demo_full):
-            return self._sample_from_buffer(batch_size, buffer='env')
-
-        # draw k_env env samples and rest demo samples
-        env_batch  = self._sample_from_buffer(k_env,              buffer='env')
-        demo_batch = self._sample_from_buffer(batch_size - k_env, buffer='demo')
-
-        # concatenate
-        obs      = torch.cat([env_batch.obs,      demo_batch.obs],      dim=0)
-        next_obs = torch.cat([env_batch.next_obs, demo_batch.next_obs], dim=0)
-        actions  = torch.cat([env_batch.actions,  demo_batch.actions],  dim=0)
-        rewards  = torch.cat([env_batch.rewards,  demo_batch.rewards],  dim=0)
-        dones    = torch.cat([env_batch.dones,    demo_batch.dones],    dim=0)
-        sources  = torch.cat([env_batch.sources,  demo_batch.sources],  dim=0)
-
-        return ReplayBufferSample(obs, next_obs, actions, rewards, dones, sources)
-
 
     def _sample_from_buffer(self, batch_size: int, buffer: str) -> ReplayBufferSample:
         """
@@ -554,7 +525,8 @@ class ManiSkillDataset(Dataset):
 
 FEATURE_LABELS = {
     "algo_ibrl": "IBRL",
-    "wu_policy": "WSRL",
+    "algo_wsrl": "WSRL",
+    "algo_jsrl": "JSRL",
     "wu_demo":   "wu_demo",
     # → when you add a new bool flag, just drop it in here
 }
@@ -579,19 +551,22 @@ if __name__ == "__main__":
     # add the name label here
     algo_name = NameBuilder(
         algo_ibrl=args.algo_ibrl,
-        wu_policy=args.algo_wsrl,
+        algo_wsrl=args.algo_wsrl,
+        algo_jsrl = args.algo_jsrl,
         wu_demo=args.wu_demo,
     )
 
+    seed = random.randint(1, 10000)
+
     if args.exp_name is None:
-        run_name = f"{args.env_id}__{algo_name}__{args.sample_mode}__{args.seed}__{args.robot_uids}__{time.strftime('%Y-%m-%d_%H-%M-%S')}"
+        run_name = f"{args.env_id}__{algo_name}__{args.sample_mode_original}__{seed}__{args.utd}__{args.robot_uids}__{time.strftime('%Y-%m-%d_%H-%M-%S')}"
     else:
         run_name = args.exp_name
 
     # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
@@ -688,7 +663,7 @@ if __name__ == "__main__":
     if args.algo_wsrl:
         offline_policy.eval()        
 
-        wu_obs, _ = envs.reset(seed=args.seed)
+        wu_obs, _ = envs.reset(seed=seed)
         for _ in tqdm.tqdm(range(args.warmup_steps // args.num_envs), desc="Warmup phase", total=args.warmup_steps // args.num_envs):
             with torch.no_grad():
                 wu_actions = offline_policy(wu_obs)
@@ -728,8 +703,8 @@ if __name__ == "__main__":
         
 
     # TRY NOT TO MODIFY: start the game
-    obs, info = envs.reset(seed=args.seed) # in Gymnasium, seed is given to reset() instead of seed()
-    eval_obs, _ = eval_envs.reset(seed=args.seed)
+    obs, info = envs.reset(seed=seed) # in Gymnasium, seed is given to reset() instead of seed()
+    eval_obs, _ = eval_envs.reset(seed=seed)
     global_step = 0
     global_update = 0
     learning_has_started = False
@@ -811,6 +786,14 @@ if __name__ == "__main__":
 
                     mask = (q_il > q_rl).unsqueeze(-1) 
                     actions = torch.where(mask, a_il, a_rl)
+            elif args.algo_jsrl:
+                with torch.no_grad():
+                    a_il = offline_policy(obs)
+                    a_rl = (actor_policy(obs) + torch.randn_like(actor_policy(obs)) * args.exploration_noise).clamp(action_low, action_high)
+
+                    js_ratio = global_step/args.total_timesteps
+                    mask = (torch.rand(len(obs), device=device) < js_ratio)
+                    actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)   
             else:
                 with torch.no_grad():
                     actions = actor_policy(obs)
@@ -866,8 +849,8 @@ if __name__ == "__main__":
         for local_update in range(args.grad_steps_per_iteration):
             global_update += 1
             # check it's offline+online or only online run
-            data = rb.sample(args.batch_size, args.sample_mode ,global_step, args.total_timesteps, args.start_p, args.final_p)   
-
+            # data = rb.sample_test(args.batch_size, args.sample_mode ,global_step, args.total_timesteps, args.start_p, args.final_p)   
+            data = rb.sample(args.batch_size, global_step, args.total_timesteps, args.start_p, args.final_p)
             # log the soruce distribution
             unique_sources, counts = torch.unique(data.sources, return_counts=True)
             fracs = counts.float() / data.sources.shape[0]
