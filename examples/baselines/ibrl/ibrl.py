@@ -684,7 +684,7 @@ if __name__ == "__main__":
         print("✅ Warm‑up policy phase complete.")
 
     elif args.wu_demo:
-        demo_path = f"demos/{args.env_id}.state.pd_joint_vel.physx_cpu.h5"
+        demo_path = f"examples/baselines/ibrl/demos/{args.env_id}.state.pd_joint_vel.physx_cpu.h5"
         # are there any function that can load demo data?\
         ds = ManiSkillDataset(
         dataset_file=demo_path,
