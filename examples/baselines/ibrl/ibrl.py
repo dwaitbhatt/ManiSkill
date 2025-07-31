@@ -646,7 +646,7 @@ if __name__ == "__main__":
 
     #warmup_policy
     offline_policy = WarmupActor(envs).to(device)
-    policy_path = f"policy/best_eval_success_once_{args.env_id}.pt"
+    policy_path = f"examples/baselines/ibrl/policy/best_eval_success_once_{args.env_id}.pt"
     offline_policy.load_state_dict(torch.load(policy_path, map_location=device)["actor"], strict=False) 
 
     envs.single_observation_space.dtype = np.float32 # type: ignore
