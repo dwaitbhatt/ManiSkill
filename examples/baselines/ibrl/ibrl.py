@@ -25,9 +25,6 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
 import tyro
 
-import mani_skill.envs
-
-
 @dataclass
 class Args:
     exp_name: Optional[str] = None
@@ -136,18 +133,10 @@ class Args:
     #wsrl
     warmup_steps: int = 5000
     """the number of warmup steps to take before starting training"""
-    algo_wsrl: bool = False
-    """whether to use the warmup policy for action selection during warmup phase"""
 
     #wu_demo
-    wu_demo: bool = False
-    """whether to use the warmup demo for action selection during warmup phase"""
     normalize_states: bool = False
     """if toggled, states are normalized to mean 0 and standard deviation 1"""
-
-    #ibrl
-    algo_ibrl: bool = False
-    """if false, use TD3, if true, use IBRL"""
 
     #jsrl
     algo_jsrl: bool = False
@@ -159,6 +148,9 @@ class Args:
 
     #sample tag
     sample_mode_original: bool = False
+
+    #algo selector
+    algo_num: int = 1
 
 @dataclass
 class ReplayBufferSample:
@@ -523,43 +515,29 @@ class ManiSkillDataset(Dataset):
         d  = torch.from_numpy(self.dones[idx]).float().to(self.device)
         return o, a, r, d, no
 
-FEATURE_LABELS = {
-    "algo_ibrl": "IBRL",
-    "algo_wsrl": "WSRL",
-    "algo_jsrl": "JSRL",
-    "wu_demo":   "wu_demo",
-    # → when you add a new bool flag, just drop it in here
-}
-
-def NameBuilder(**flags):
-    base = "TD3"
-    # pick out only the flags that are true
-    selected = [FEATURE_LABELS[name]
-                for name, is_on in flags.items()
-                if is_on and name in FEATURE_LABELS]
-
-    if not selected:
-        return base
-
-    # join all the active pieces with " + "
-    return base + " + " + " + ".join(selected)
-
+def algo_selector(algo_num: int) -> tuple[bool, bool, bool]:
+    # wu_demo, WSRL, IBRL
+    options = {
+        1: (False, False, False),   #TD3
+        2: (True,  False, False),   #TD3+wu_demo
+        3: (False, True,  False),   #TD3+WSRL
+        4: (True,  False, True),    #TD3+wu_demo+IBRL
+        5: (False, True,  True),    #TD3+WSRL+IBRL
+    }
+    return options.get(algo_num, (False, False, False))
+    
 if __name__ == "__main__":
     args = tyro.cli(Args)
     args.grad_steps_per_iteration = int(args.training_freq * args.utd)
     args.steps_per_env = args.training_freq // args.num_envs
     # add the name label here
-    algo_name = NameBuilder(
-        algo_ibrl=args.algo_ibrl,
-        algo_wsrl=args.algo_wsrl,
-        algo_jsrl = args.algo_jsrl,
-        wu_demo=args.wu_demo,
-    )
+
+    wu_demo, wsrl, ibrl = algo_selector(args.algo_num)
 
     seed = random.randint(1, 10000)
 
     if args.exp_name is None:
-        run_name = f"{args.env_id}__{algo_name}__{args.sample_mode_original}__{seed}__{args.utd}__{args.robot_uids}__{time.strftime('%Y-%m-%d_%H-%M-%S')}"
+        run_name = f"{args.env_id}__{args.algo_num}__{args.sample_mode_original}__{seed}__{args.utd}__{args.robot_uids}__{time.strftime('%Y-%m-%d_%H-%M-%S')}"
     else:
         run_name = args.exp_name
 
@@ -609,7 +587,7 @@ if __name__ == "__main__":
                 config=config,
                 name=run_name,
                 save_code=True,
-                group= args.wandb_group if args.wandb_group is not None else algo_name,
+                group= args.wandb_group if args.wandb_group is not None else str(args.algo_num),
                 tags=["wsrl", "walltime_efficient"]
             )
         writer = SummaryWriter(f"runs/{run_name}")
@@ -660,7 +638,7 @@ if __name__ == "__main__":
     )
 
     #warmup phase
-    if args.algo_wsrl:
+    if wsrl:
         offline_policy.eval()        
 
         wu_obs, _ = envs.reset(seed=seed)
@@ -683,7 +661,7 @@ if __name__ == "__main__":
             wu_obs = next_wu_obs
         print("✅ Warm‑up policy phase complete.")
 
-    elif args.wu_demo:
+    elif wu_demo:
         demo_path = f"examples/baselines/ibrl/demos/{args.env_id}.state.pd_joint_vel.physx_cpu.h5"
         # are there any function that can load demo data?\
         ds = ManiSkillDataset(
@@ -775,7 +753,7 @@ if __name__ == "__main__":
             if not learning_has_started:
                 actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
             # ibrl action selection part
-            elif args.algo_ibrl:
+            elif ibrl:
                 with torch.no_grad():
                     a_il = offline_policy(obs)
                     a_rl = (actor_policy(obs) + torch.randn_like(actor_policy(obs)) * args.exploration_noise).clamp(action_low, action_high)
@@ -786,14 +764,14 @@ if __name__ == "__main__":
 
                     mask = (q_il > q_rl).unsqueeze(-1) 
                     actions = torch.where(mask, a_il, a_rl)
-            elif args.algo_jsrl:
-                with torch.no_grad():
-                    a_il = offline_policy(obs)
-                    a_rl = (actor_policy(obs) + torch.randn_like(actor_policy(obs)) * args.exploration_noise).clamp(action_low, action_high)
+            # elif args.algo_jsrl:
+            #     with torch.no_grad():
+            #         a_il = offline_policy(obs)
+            #         a_rl = (actor_policy(obs) + torch.randn_like(actor_policy(obs)) * args.exploration_noise).clamp(action_low, action_high)
 
-                    js_ratio = global_step/args.total_timesteps
-                    mask = (torch.rand(len(obs), device=device) < js_ratio)
-                    actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)   
+            #         js_ratio = global_step/args.total_timesteps
+            #         mask = (torch.rand(len(obs), device=device) < js_ratio)
+            #         actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)   
             else:
                 with torch.no_grad():
                     actions = actor_policy(obs)
@@ -857,7 +835,7 @@ if __name__ == "__main__":
             for src, frac in zip(unique_sources.tolist(), fracs.tolist()):
                 logger.add_scalar(f"data/source_{src}_frac", frac, global_step) # type: ignore
 
-            if args.algo_ibrl:
+            if ibrl:
                 with torch.no_grad():
                     next_a_rl = actor_target(data.next_obs)
                     noise = (torch.randn_like(data.actions) * args.policy_noise).clamp(-args.noise_clip, args.noise_clip)
