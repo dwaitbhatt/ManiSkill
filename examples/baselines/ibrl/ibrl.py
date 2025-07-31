@@ -152,6 +152,10 @@ class Args:
     #algo selector
     algo_num: int = 1
 
+    #qfs number
+    qfs_num: int = 2
+    min_q_target: int = 2
+
 @dataclass
 class ReplayBufferSample:
     obs: torch.Tensor
@@ -433,18 +437,28 @@ class Logger:
     def close(self):
         self.writer.close() # type: ignore
 
-class CriticEsemble:
-    def __init__(self, q1: nn.Module, q2: nn.Module):
-        self.q1 = q1
-        self.q2 = q2
+class CriticEsemble(nn.Module):
+    def __init__(self, qfs: list[nn.Module], qfs_target: list[nn.Module], min_target_qfs: int, device):
+        super().__init__()
+        self.qfs = nn.ModuleList(qfs)
+        self.qfs_target = nn.ModuleList(qfs_target)
+        self.device = device
+        self.min_qfs = min_target_qfs
 
     @torch.no_grad()
-    def clipped_q_min(self, obs, actions):
-        """Return min_i Q_i(obs, actions), shape [batch,1]."""
-        q1 = self.q1(obs, actions).view(-1)
-        q2 = self.q2(obs, actions).view(-1)
-        return torch.min(q1, q2)
-
+    def random_find_min_qf(self, obs, actions, qfs: bool = True):
+        critics = self.qfs if qfs else self.qfs_target
+        i, j = random.sample(range(len(critics)), 2)
+        qi = critics[i](obs, actions).view(-1)
+        qj = critics[j](obs, actions).view(-1)
+        return torch.min(qi, qj)
+    
+    @torch.no_grad()
+    def random_close_qf(self, obs, actions, lam):
+        k = random.randint(self.min_qfs, len(self.qfs))
+        idxs = random.sample(range(len(self.qfs)), k)
+        min_q_val = torch.stack([self.qfs[i](obs, actions, lam).view(-1) for i in idxs], dim=0).min(dim=0)
+        return min_q_val
 
 def load_h5_data(data):
     out = dict()
@@ -599,28 +613,18 @@ if __name__ == "__main__":
     else:
         print("Running evaluation")
 
-    max_action = float(envs.single_action_space.high[0])
-
-    # add actor target
     actor_policy = Actor(envs).to(device)
     actor_target = Actor(envs).to(device)
+    qfs = nn.ModuleList([SoftQNetwork(envs).to(device) for _ in range(args.qfs_num)])
+    qfs_target = nn.ModuleList([SoftQNetwork(envs).to(device) for _ in range(args.qfs_num)])
 
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
-    if args.checkpoint is not None:
-        ckpt = torch.load(args.checkpoint)
-        actor_policy.load_state_dict(ckpt['actor'])
-        qf1.load_state_dict(ckpt['qf1'])
-        qf2.load_state_dict(ckpt['qf2'])
-
-    qf1_target.load_state_dict(qf1.state_dict())
-    qf2_target.load_state_dict(qf2.state_dict())
+    for i in range(len(qfs_target)):
+        qfs_target[i].load_state_dict(qfs[i].state_dict())
     actor_target.load_state_dict(actor_policy.state_dict())
-    q_optimizer = optim.Adam(list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr)
-    actor_optimizer = optim.Adam(list(actor_policy.parameters()), lr=args.policy_lr)
+    critic_ensemble = CriticEsemble(list(qfs) ,list(qfs_target), min_target_qfs=args.min_q_target, device=device)
+
+    q_optimizer = optim.Adam([p for qf in qfs for p in qf.parameters()], lr=args.q_lr)
+    actor_optimizer = optim.Adam(list(actor_policy.parameters()), lr=args.policy_lr) 
 
     #warmup_policy
     offline_policy = WarmupActor(envs).to(device)
@@ -733,12 +737,10 @@ if __name__ == "__main__":
 
             if args.save_model:
                 model_path = f"runs/{run_name}/ckpt_{global_step}.pt"
-                torch.save({
-                    'actor': actor_policy.state_dict(),
-                    'qf1': qf1_target.state_dict(),
-                    'qf2': qf2_target.state_dict(),
-                    # 'log_alpha': log_alpha,
-                }, model_path)
+                checkpoint = {'actor': actor_policy.state_dict()}
+                for i, qf_target in enumerate(qfs_target):
+                    checkpoint[f"qf{i+1}"] = qf_target.state_dict()
+                torch.save(checkpoint, model_path)
                 print(f"model saved to {model_path}")
 
         action_low = torch.tensor(envs.single_action_space.low, device=device)
@@ -758,9 +760,8 @@ if __name__ == "__main__":
                     a_il = offline_policy(obs)
                     a_rl = (actor_policy(obs) + torch.randn_like(actor_policy(obs)) * args.exploration_noise).clamp(action_low, action_high)
                     
-                    critic_ensemble = CriticEsemble(qf1, qf2)
-                    q_il = critic_ensemble.clipped_q_min(obs, a_il) 
-                    q_rl = critic_ensemble.clipped_q_min(obs, a_rl) 
+                    q_il = critic_ensemble.random_find_min_qf(obs, a_il) 
+                    q_rl = critic_ensemble.random_find_min_qf(obs, a_rl) 
 
                     mask = (q_il > q_rl).unsqueeze(-1) 
                     actions = torch.where(mask, a_il, a_rl)
@@ -842,41 +843,31 @@ if __name__ == "__main__":
                     next_a_rl = (next_a_rl + noise).clamp(action_low, action_high)
                     next_a_il = offline_policy(data.next_obs)
 
-                    critic_ensemble = CriticEsemble(qf1_target, qf2_target)
-                    next_min_q_rl = critic_ensemble.clipped_q_min(data.next_obs, next_a_rl)
-                    next_min_q_il = critic_ensemble.clipped_q_min(data.next_obs, next_a_il)
+                    next_min_q_target_rl = critic_ensemble.random_find_min_qf(data.next_obs, next_a_rl, qfs=False)
+                    next_min_q_target_il = critic_ensemble.random_find_min_qf(data.next_obs, next_a_il, qfs=False)
+                    next_max_q_target_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * torch.max(next_min_q_target_rl, next_min_q_target_il)
 
-                    next_max_q_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * torch.max(next_min_q_rl, next_min_q_il)
-                    train_mask = (next_min_q_il > next_min_q_rl).unsqueeze(-1) # 0 for RL, 1 for IL
-
-                qf1_a_values = qf1(data.obs, data.actions).view(-1)
-                qf2_a_values = qf2(data.obs, data.actions).view(-1)
-                qf1_loss = F.mse_loss(qf1_a_values, next_max_q_val)
-                qf2_loss = F.mse_loss(qf2_a_values, next_max_q_val)
-                qf_loss = qf1_loss + qf2_loss
-
+                qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), next_max_q_target_val) for qf in qfs]
+                qf_loss_total = torch.stack(qf_losses, dim=0).sum()
                 q_optimizer.zero_grad()
-                qf_loss.backward()
+                qf_loss_total.backward()
                 q_optimizer.step() 
-
-                for p, p_target in zip(qf1.parameters(), qf1_target.parameters()):
-                    p_target.data.copy_(args.tau * p.data + (1 - args.tau) * p_target.data)
-                for p, p_target in zip(qf2.parameters(), qf2_target.parameters()):
-                    p_target.data.copy_(args.tau * p.data + (1 - args.tau) * p_target.data)  
 
                 if global_update % args.policy_frequency == 0:
                     pi = actor_policy(data.obs)
-                    q1_pi = qf1(data.obs, pi)
-                    q2_pi = qf2(data.obs, pi)
-                    min_q_pi = torch.min(q1_pi, q2_pi)
+                    qs = [qf(data.obs, pi) for qf in qfs]
+                    qs_cat = torch.cat(qs, dim=1)
+                    min_q_pi, _ = qs_cat.min(dim=1, keepdim=True)
                     
                     actor_loss = -min_q_pi.mean()
                     actor_optimizer.zero_grad()
                     actor_loss.backward()
                     actor_optimizer.step()
 
-                # soft‐update actor
-                if global_update % args.target_network_frequency == 0:
+                    #target network update
+                    for qf, qf_target in zip(qfs, qfs_target):
+                        for qf_para, qf_target_para in zip(qf.parameters(), qf_target.parameters()):
+                            qf_target_para.data.copy_(args.tau * qf_para.data + (1 - args.tau) * qf_target_para.data)
                     for p, p_target in zip(actor_policy.parameters(), actor_target.parameters()):
                         p_target.data.copy_(args.tau * p.data + (1 - args.tau) * p_target.data)   
                     
@@ -888,42 +879,31 @@ if __name__ == "__main__":
                     next_state_actions = (next_actions + noise).clamp(action_low, action_high)
 
                     #double q learning
-                    qf1_next_target = qf1_target(data.next_obs, next_state_actions)
-                    qf2_next_target = qf2_target(data.next_obs, next_state_actions)
-                    min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
+                    min_qf_next_target = critic_ensemble.random_find_min_qf(data.next_obs, next_state_actions, qfs=False)
                     next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * (min_qf_next_target).view(-1)
-                    # data.dones is "stop_bootstrap", which is computed earlier according to args.bootstrap_at_done
 
-                qf1_a_values = qf1(data.obs, data.actions).view(-1)
-                qf2_a_values = qf2(data.obs, data.actions).view(-1)
-                qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-                qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-                qf_loss = qf1_loss + qf2_loss
-
+                qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), next_q_value) for qf in qfs]
+                qf_loss_total = torch.stack(qf_losses, dim=0).sum()
                 q_optimizer.zero_grad()
-                qf_loss.backward()
-                q_optimizer.step()
+                qf_loss_total.backward() # type: ignore
+                q_optimizer.step() 
 
                 # update the policy network
                 if global_update % args.policy_frequency == 0:  # TD 3 Delayed update support
-                    # find minimun actor loss
-                    qf1_pi = qf1(data.obs, actor_policy(data.obs))
-                    qf2_pi = qf2(data.obs, actor_policy(data.obs))
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
-                    # actor loss
-                    actor_loss = -min_qf_pi.mean()
-
+                    pi = actor_policy(data.obs)  
+                    qs = [qf(data.obs, pi) for qf in qfs]
+                    qs_cat = torch.cat(qs, dim=1)
+                    min_q_pi, _ = qs_cat.min(dim=1, keepdim=True)
+                    
+                    actor_loss = -min_q_pi.mean()
                     actor_optimizer.zero_grad()
                     actor_loss.backward()
                     actor_optimizer.step()
 
                 # update the target networks
-                if global_update % args.target_network_frequency == 0:
-                    for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
-                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                    for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
-                        target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                    # target_actor iteration
+                    for qf, qf_target in zip(qfs, qfs_target):
+                        for qf_para, qf_target_para in zip(qf.parameters(), qf_target.parameters()):
+                            qf_target_para.data.copy_(args.tau * qf_para.data + (1 - args.tau) * qf_target_para.data)
                     for param, target_param in zip(actor_policy.parameters(), actor_target.parameters()):
                         target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
@@ -932,11 +912,11 @@ if __name__ == "__main__":
 
         # Log training-related data
         if (global_step - args.training_freq) // args.log_freq < global_step // args.log_freq:
-            logger.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step) # type: ignore
-            logger.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step) # type: ignore
-            logger.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step) # type: ignore
-            logger.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step) # type: ignore
-            logger.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step) # type: ignore
+            for i, (qf, loss) in enumerate(zip(qfs, qf_losses), start=1): # type: ignore
+                q_vals = qf(data.obs, data.actions).view(-1) # type: ignore
+                logger.add_scalar(f"losses/qf{i}_values", q_vals.mean().item(), global_step) # type: ignore
+                logger.add_scalar(f"losses/qf{i}_loss",  loss.item(), global_step) # type: ignore
+            logger.add_scalar("losses/qf_loss", (qf_loss_total / len(qfs)).item(), global_step) # type: ignore
             if global_update % args.policy_frequency == 0:
                 logger.add_scalar("losses/actor_loss", actor_loss.item(), global_step) # type: ignore
             logger.add_scalar("time/update_time", update_time, global_step) # type: ignore
@@ -948,12 +928,10 @@ if __name__ == "__main__":
 
     if not args.evaluate and args.save_model:
         model_path = f"runs/{run_name}/final_ckpt.pt"
-        torch.save({
-            'actor': actor_policy.state_dict(),
-            'qf1': qf1_target.state_dict(),
-            'qf2': qf2_target.state_dict(),
-            # 'log_alpha': log_alpha,
-        }, model_path)
+        final_checkpoint = {'actor': actor_policy.state_dict()}
+        for i, qf_target in enumerate(qfs_target):
+            final_checkpoint[f"qf{i+1}"] = qf_target.state_dict()
+        torch.save(final_checkpoint, model_path)
         print(f"model saved to {model_path}")
         writer.close() # type: ignore
     envs.close()
