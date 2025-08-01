@@ -23,6 +23,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
+from typing import Sequence
 import tyro
 
 @dataclass
@@ -156,6 +157,12 @@ class Args:
     qfs_num: int = 2
     min_q_target: int = 2
 
+    #cheq parameter 
+    ulow: float = 0.03
+    uhigh: float = 0.15
+    lam_low: float = 0.2
+    lam_high: float = 1.0
+
 @dataclass
 class ReplayBufferSample:
     obs: torch.Tensor
@@ -167,7 +174,7 @@ class ReplayBufferSample:
     # sources tag: 0 from env, 1 from wu_demo, 2 from wsrl
 
 class ReplayBuffer:
-    def __init__(self, env, num_envs: int, buffer_size: int, demo_buffer_size: int, storage_device: torch.device, sample_device: torch.device):
+    def __init__(self, env, num_envs: int, buffer_size: int, demo_buffer_size: int, storage_device: torch.device, sample_device: torch.device, cheq_activate: bool):
         self.buffer_size = buffer_size
         self.pos = 0
         self.full = False
@@ -179,8 +186,14 @@ class ReplayBuffer:
         self.sample_device = sample_device
         self.per_env_buffer_size = buffer_size // num_envs
         self.demo_per_env_buffer_size = demo_buffer_size // num_envs
-        self.obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
-        self.next_obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
+        if cheq_activate:
+            orig_shape = env.single_observation_space.shape      # e.g. (48,)
+            augmented_shape = (*orig_shape[:-1], orig_shape[-1] + 1)  # → (49,)
+            self.obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + augmented_shape).to(storage_device)
+            self.next_obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + augmented_shape).to(storage_device)
+        else:
+            self.obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
+            self.next_obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
         self.actions = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_action_space.shape).to(storage_device)
         self.rewards = torch.zeros((self.per_env_buffer_size, self.num_envs)).to(storage_device)
         self.dones = torch.zeros((self.per_env_buffer_size, self.num_envs)).to(storage_device)
@@ -215,7 +228,6 @@ class ReplayBuffer:
             action = action.cpu()
             reward = reward.cpu()
             done = done.cpu()
-
 
         obs, next_obs, action, reward, done = self.clean_samples(obs, next_obs, action, reward, done)
 
@@ -426,6 +438,46 @@ class Actor(nn.Module):
         action = self.backbone(x)
         return action * self.action_scale + self.action_bias
     
+class ActorWithLambda(nn.Module):
+    def __init__(self, env):
+        super().__init__()
+        self.backbone = nn.Sequential(
+            nn.Linear(np.array(env.single_observation_space.shape).prod() +1, 256), # have to plus one cuz by the obs + lambda
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, np.prod(env.single_action_space.shape)),
+            nn.Tanh()
+        )
+
+        # precompute rescaling buffers
+        h, l = env.single_action_space.high, env.single_action_space.low
+        self.register_buffer("action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32))
+        self.register_buffer("action_bias", torch.tensor((h + l) / 2.0, dtype=torch.float32))
+
+    def forward(self, obs_plus_lambda: torch.Tensor) -> torch.Tensor:
+        raw_action = self.backbone(obs_plus_lambda)
+        return raw_action * self.action_scale + self.action_bias
+    
+class SoftQNetworkWithLambda(nn.Module):
+    def __init__(self, env):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear((np.array(env.single_observation_space.shape).prod() + np.prod(env.single_action_space.shape)) + 1, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, obs_plus_lam, a):
+        x = torch.cat([obs_plus_lam, a], 1)
+        return self.net(x)
+    
 class Logger:
     def __init__(self, log_wandb=False, tensorboard: Optional[SummaryWriter] = None) -> None:
         self.writer = tensorboard
@@ -454,20 +506,12 @@ class CriticEsemble(nn.Module):
         return torch.min(qi, qj)
     
     @torch.no_grad()
-    def random_close_qf(self, obs, actions, lam):
-        k = random.randint(self.min_qfs, len(self.qfs))
-        idxs = random.sample(range(len(self.qfs)), k)
-        min_q_val = torch.stack([self.qfs[i](obs, actions, lam).view(-1) for i in idxs], dim=0).min(dim=0)
+    def random_close_qf(self, obs_plus_lam, actions):
+        k = random.randint(self.min_qfs, len(self.qfs_target))
+        idxs = random.sample(range(len(self.qfs_target)), k)
+        min_q_val = torch.stack([self.qfs_target[i](obs_plus_lam, actions).view(-1) for i in idxs], dim=0)
+        min_q_val = min_q_val.min(dim=0).values
         return min_q_val
-
-def load_h5_data(data):
-    out = dict()
-    for k in data.keys():
-        if isinstance(data[k], h5py.Dataset):
-            out[k] = data[k][:]
-        else:
-            out[k] = load_h5_data(data[k])
-    return out
 
 class ManiSkillDataset(Dataset):
     def __init__(
@@ -528,17 +572,60 @@ class ManiSkillDataset(Dataset):
         r  = torch.tensor(self.rewards[idx], dtype=torch.float32, device=self.device)
         d  = torch.from_numpy(self.dones[idx]).float().to(self.device)
         return o, a, r, d, no
+    
+class CheqAlgorithmTool:
+    def __init__(self, qfs: list[nn.Module], ulow: float, uhigh: float, lam_low: float, lam_high: float):
+        self.qfs = nn.ModuleList(qfs)
+        self.ulow = ulow
+        self.uhigh = uhigh
+        self.lam_low = lam_low
+        self.lam_high = lam_high
 
-def algo_selector(algo_num: int) -> tuple[bool, bool, bool]:
+    def inject_weight_into_state(self, obs, lam):
+        return torch.cat([obs, lam], dim=1) #[B, D+1]
+    
+    def remove_weight_in_state(self, obs_plus_lam):
+        return obs_plus_lam[..., :-1]
+    
+    def get_lambda(self, u):
+        lam_vals = torch.empty_like(u)
+        lower_mask = (u <= self.ulow)
+        upper_mask = (u >= self.uhigh)
+        mid_mask   = ~(lower_mask | upper_mask)
+
+        lam_vals[lower_mask] = self.lam_low
+        lam_vals[upper_mask] = self.lam_high
+
+        mid_u = u[mid_mask]
+        frac = (mid_u - self.ulow)/(self.uhigh - self.ulow)  # in [0,1]
+        lam_vals[mid_mask] = self.lam_low + frac*(self.lam_high - self.lam_low)
+
+        return lam_vals  # shape [N,1]    
+
+    def compute_u(self, obs_plus_lambda, action):
+        q_diff = torch.stack([qf(obs_plus_lambda, action) for qf in self.qfs], dim=1)
+        return q_diff.std(dim=1, unbiased=False)
+
+def algo_selector(algo_num: int) -> tuple[bool, bool, bool, bool]:
     # wu_demo, WSRL, IBRL
     options = {
-        1: (False, False, False),   #TD3
-        2: (True,  False, False),   #TD3+wu_demo
-        3: (False, True,  False),   #TD3+WSRL
-        4: (True,  False, True),    #TD3+wu_demo+IBRL
-        5: (False, True,  True),    #TD3+WSRL+IBRL
+        1: (False, False, False, False),   #TD3
+        2: (True,  False, False, False),   #TD3+wu_demo
+        3: (False, True,  False, False),   #TD3+WSRL
+        4: (True,  False, True, False),    #TD3+wu_demo+IBRL
+        5: (False, True,  True, False),    #TD3+WSRL+IBRL
+        6: (False, False, False, True),    #CHEQ
     }
-    return options.get(algo_num, (False, False, False))
+    return options.get(algo_num, (False, False, False, False))
+
+def load_h5_data(data):
+    out = dict()
+    for k in data.keys():
+        if isinstance(data[k], h5py.Dataset):
+            out[k] = data[k][:]
+        else:
+            out[k] = load_h5_data(data[k])
+    return out
     
 if __name__ == "__main__":
     args = tyro.cli(Args)
@@ -546,7 +633,7 @@ if __name__ == "__main__":
     args.steps_per_env = args.training_freq // args.num_envs
     # add the name label here
 
-    wu_demo, wsrl, ibrl = algo_selector(args.algo_num)
+    wu_demo, wsrl, ibrl, cheq= algo_selector(args.algo_num)
 
     seed = random.randint(1, 10000)
 
@@ -613,15 +700,22 @@ if __name__ == "__main__":
     else:
         print("Running evaluation")
 
-    actor_policy = Actor(envs).to(device)
-    actor_target = Actor(envs).to(device)
-    qfs = nn.ModuleList([SoftQNetwork(envs).to(device) for _ in range(args.qfs_num)])
-    qfs_target = nn.ModuleList([SoftQNetwork(envs).to(device) for _ in range(args.qfs_num)])
+    if cheq:
+        actor_policy = ActorWithLambda(envs).to(device)
+        actor_target = ActorWithLambda(envs).to(device)
+        qfs = nn.ModuleList([SoftQNetworkWithLambda(envs).to(device) for _ in range(args.qfs_num)])
+        qfs_target = nn.ModuleList([SoftQNetworkWithLambda(envs).to(device) for _ in range(args.qfs_num)])        
+    else:
+        actor_policy = Actor(envs).to(device)
+        actor_target = Actor(envs).to(device)
+        qfs = nn.ModuleList([SoftQNetwork(envs).to(device) for _ in range(args.qfs_num)])
+        qfs_target = nn.ModuleList([SoftQNetwork(envs).to(device) for _ in range(args.qfs_num)])
 
     for i in range(len(qfs_target)):
         qfs_target[i].load_state_dict(qfs[i].state_dict())
     actor_target.load_state_dict(actor_policy.state_dict())
     critic_ensemble = CriticEsemble(list(qfs) ,list(qfs_target), min_target_qfs=args.min_q_target, device=device)
+    cheq_algo_tool = CheqAlgorithmTool(list(qfs), args.ulow, args.uhigh, args.lam_low, args.lam_high)
 
     q_optimizer = optim.Adam([p for qf in qfs for p in qf.parameters()], lr=args.q_lr)
     actor_optimizer = optim.Adam(list(actor_policy.parameters()), lr=args.policy_lr) 
@@ -638,13 +732,13 @@ if __name__ == "__main__":
         buffer_size=args.buffer_size,
         demo_buffer_size=args.buffer_size,
         storage_device=torch.device(args.buffer_device),
-        sample_device=device
+        sample_device=device, 
+        cheq_activate=cheq
     )
 
     #warmup phase
     if wsrl:
         offline_policy.eval()        
-
         wu_obs, _ = envs.reset(seed=seed)
         for _ in tqdm.tqdm(range(args.warmup_steps // args.num_envs), desc="Warmup phase", total=args.warmup_steps // args.num_envs):
             with torch.no_grad():
@@ -711,7 +805,20 @@ if __name__ == "__main__":
             num_episodes = 0
             for _ in range(args.num_eval_steps):
                 with torch.no_grad():
-                    eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor_policy(eval_obs))
+                    if cheq:
+                        lam_eval_feed = torch.ones((args.num_eval_envs, 1), device=device)
+                        obs_plus_lam_eval = cheq_algo_tool.inject_weight_into_state(eval_obs, lam_eval_feed)
+                        eval_a_rl = actor_policy(obs_plus_lam_eval)
+                        eval_a_il = offline_policy(eval_obs)
+
+                        eval_u_val = cheq_algo_tool.compute_u(obs_plus_lam_eval, eval_a_rl)
+                        eval_lam_val = cheq_algo_tool.get_lambda(eval_u_val)
+
+                        final_action = eval_lam_val * eval_a_rl + (1 - eval_lam_val) * eval_a_il
+
+                        eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(final_action)
+                    else:
+                        eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(actor_policy(eval_obs))
                     if "final_info" in eval_infos:
                         mask = eval_infos["_final_info"]
                         num_episodes += mask.sum()
@@ -753,7 +860,14 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: put action logic here
             if not learning_has_started:
-                actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
+                if cheq:
+                    a_il = offline_policy(obs)
+                    a_rl = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
+                    lam_val = torch.full((args.num_envs, 1),args.lam_low, device=device)
+                    obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_val)
+                    actions = lam_val * a_rl + (1-lam_val) * a_il
+                else:
+                    actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
             # ibrl action selection part
             elif ibrl:
                 with torch.no_grad():
@@ -772,7 +886,17 @@ if __name__ == "__main__":
 
             #         js_ratio = global_step/args.total_timesteps
             #         mask = (torch.rand(len(obs), device=device) < js_ratio)
-            #         actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)   
+            #         actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)  
+            elif cheq:
+                with torch.no_grad():
+                    lam_feed = torch.ones((args.num_envs, 1), device=device)
+                    obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_feed)
+                    a_il = offline_policy(obs)
+                    a_rl = actor_policy(obs_plus_lam)
+                    u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
+                    lam_val = cheq_algo_tool.get_lambda(u_val)
+                    actions = lam_val * a_rl + (1-lam_val) * a_il
+         
             else:
                 with torch.no_grad():
                     actions = actor_policy(obs)
@@ -809,8 +933,11 @@ if __name__ == "__main__":
                 real_next_obs[need_final_obs] = infos["final_observation"][need_final_obs] # type: ignore
                 for k, v in final_info["episode"].items():
                     logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step) # type: ignore
-
-            rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap, sources=0) # type: ignore
+            if cheq:
+                next_obs_plus_lam = cheq_algo_tool.inject_weight_into_state(real_next_obs, lam_val)# type: ignore
+                rb.add(obs_plus_lam, next_obs_plus_lam, actions, rewards, stop_bootstrap, sources=0)# type: ignore
+            else:
+                rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap, sources=0) # type: ignore
 
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
             obs = next_obs
@@ -870,6 +997,36 @@ if __name__ == "__main__":
                             qf_target_para.data.copy_(args.tau * qf_para.data + (1 - args.tau) * qf_target_para.data)
                     for p, p_target in zip(actor_policy.parameters(), actor_target.parameters()):
                         p_target.data.copy_(args.tau * p.data + (1 - args.tau) * p_target.data)   
+            
+            elif cheq:
+                with torch.no_grad():
+                    next_action = actor_target(data.obs)
+                    noise = (torch.randn_like(data.actions) * args.policy_noise).clamp(-args.noise_clip, args.noise_clip)
+                    next_action = (next_action + noise).clamp(action_low, action_high)   
+                    min_q_val = critic_ensemble.random_close_qf(data.next_obs, next_action)  
+                    min_q_target_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * min_q_val
+
+                qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), min_q_target_val) for qf in qfs]
+                qf_loss_total = torch.stack(qf_losses, dim=0).sum()
+                q_optimizer.zero_grad()
+                qf_loss_total.backward() 
+                q_optimizer.step()   
+
+                if global_update % args.policy_frequency == 0:
+                    pi = actor_policy(data.obs)
+                    pi_q_list_val = [qf(data.obs, pi) for qf in qfs]
+                    min_pi_q_val, _ = torch.cat(pi_q_list_val, dim=1).min(dim=1, keepdim=True)
+
+                    actor_loss = -min_pi_q_val.mean()
+                    actor_optimizer.zero_grad()
+                    actor_loss.backward()
+                    actor_optimizer.step()
+
+                    for qf, qf_target in zip(qfs, qfs_target):
+                        for qf_para, qf_target_para in zip(qf.parameters(), qf_target.parameters()):
+                            qf_target_para.data.copy_(args.tau * qf_para.data + (1 - args.tau) * qf_target_para.data)
+                    for p, p_target in zip(actor_policy.parameters(), actor_target.parameters()):
+                        p_target.data.copy_(args.tau * p.data + (1 - args.tau) * p_target.data)   
                     
             # update the value networks
             else: 
@@ -885,7 +1042,7 @@ if __name__ == "__main__":
                 qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), next_q_value) for qf in qfs]
                 qf_loss_total = torch.stack(qf_losses, dim=0).sum()
                 q_optimizer.zero_grad()
-                qf_loss_total.backward() # type: ignore
+                qf_loss_total.backward()
                 q_optimizer.step() 
 
                 # update the policy network
