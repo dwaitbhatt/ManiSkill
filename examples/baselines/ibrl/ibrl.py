@@ -1003,13 +1003,13 @@ if __name__ == "__main__":
                     next_action = actor_target(data.obs)
                     noise = (torch.randn_like(data.actions) * args.policy_noise).clamp(-args.noise_clip, args.noise_clip)
                     next_action = (next_action + noise).clamp(action_low, action_high)   
-                    min_q_val = critic_ensemble.random_close_qf(data.next_obs, next_action)  
-                    min_q_target_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * min_q_val
+                min_q_val = critic_ensemble.random_close_qf(data.next_obs, next_action)  
+                min_q_target_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * min_q_val
 
                 qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), min_q_target_val) for qf in qfs]
                 qf_loss_total = torch.stack(qf_losses, dim=0).sum()
                 q_optimizer.zero_grad()
-                qf_loss_total.backward() 
+                qf_loss_total.backward(retain_graph=True) 
                 q_optimizer.step()   
 
                 if global_update % args.policy_frequency == 0:
