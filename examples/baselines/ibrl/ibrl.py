@@ -56,6 +56,7 @@ class Args:
     """path to a pretrained checkpoint file to start evaluation/training from"""
     log_freq: int = 1_000
     """logging frequency in terms of environment steps"""
+    wandb_video_freq: int = 2
 
     # Environment specific arguments
     env_id: str = "PickCube-v1"
@@ -192,16 +193,18 @@ class ReplayBuffer:
             augmented_shape = (*orig_shape[:-1], orig_shape[-1] + 1)  # → (49,)
             self.obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + augmented_shape).to(storage_device)
             self.next_obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + augmented_shape).to(storage_device)
+            self.demo_obs = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + augmented_shape).to(storage_device)
+            self.demo_next_obs = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + augmented_shape).to(storage_device)
         else:
             self.obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
             self.next_obs = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
+            self.demo_obs = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
+            self.demo_next_obs = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
         self.actions = torch.zeros((self.per_env_buffer_size, self.num_envs) + env.single_action_space.shape).to(storage_device)
         self.rewards = torch.zeros((self.per_env_buffer_size, self.num_envs)).to(storage_device)
         self.dones = torch.zeros((self.per_env_buffer_size, self.num_envs)).to(storage_device)
         self.sources = torch.zeros((self.per_env_buffer_size, self.num_envs), dtype=torch.uint8).to(storage_device)
 
-        self.demo_obs = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
-        self.demo_next_obs = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + env.single_observation_space.shape).to(storage_device)
         self.demo_actions = torch.zeros((self.demo_per_env_buffer_size, self.num_envs) + env.single_action_space.shape).to(storage_device)
         self.demo_rewards = torch.zeros((self.demo_per_env_buffer_size, self.num_envs)).to(storage_device)
         self.demo_dones = torch.zeros((self.demo_per_env_buffer_size, self.num_envs)).to(storage_device)
@@ -416,7 +419,6 @@ class WarmupActor(nn.Module):
         action = self.net(x)
         return action * self.action_wu_scale + self.action_wu_bias
 
-
 class Actor(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -615,7 +617,10 @@ def algo_selector(algo_num: int) -> tuple[bool, bool, bool, bool]:
         3: (False, True,  False, False),   #TD3+WSRL
         4: (True,  False, True, False),    #TD3+wu_demo+IBRL
         5: (False, True,  True, False),    #TD3+WSRL+IBRL
-        6: (False, False, False, True),    #CHEQ
+        6: (False, False, False, True),    #TD3+CHEQ
+        7: (True, False, False, True),     #TD3+wu_demo+CHEQ
+        8: (False, True, False, True),     #TD3+WSRL+CHEQ
+
     }
     return options.get(algo_num, (False, False, False, False))
 
@@ -723,7 +728,7 @@ if __name__ == "__main__":
     #warmup_policy
     offline_policy = WarmupActor(envs).to(device)
     policy_path = f"examples/baselines/ibrl/policy/best_eval_success_once_{args.env_id}.pt"
-    offline_policy.load_state_dict(torch.load(policy_path, map_location=device)["actor"], strict=False) 
+    offline_policy.load_state_dict(torch.load(policy_path, map_location=device)["actor"], strict=False)  
 
     envs.single_observation_space.dtype = np.float32 # type: ignore
     rb = ReplayBuffer(
@@ -743,7 +748,6 @@ if __name__ == "__main__":
         for _ in tqdm.tqdm(range(args.warmup_steps // args.num_envs), desc="Warmup phase", total=args.warmup_steps // args.num_envs):
             with torch.no_grad():
                 wu_actions = offline_policy(wu_obs)
-
             next_wu_obs, wu_rew, wu_terminations, wu_truncations, _ = envs.step(wu_actions)
             if args.bootstrap_at_done == 'never':
                 need_final_obs = torch.ones_like(wu_terminations, dtype=torch.bool) # type: ignore
@@ -755,7 +759,15 @@ if __name__ == "__main__":
                 else: # bootstrap at truncated
                     need_final_obs = wu_truncations & (~wu_terminations) # type: ignore # only need final obs when truncated and not terminated
                     wu_stop_bootstrap = wu_terminations # only stop bootstrap when terminated, don't stop when truncated
-            rb.add(wu_obs, next_wu_obs, wu_actions, wu_rew, wu_stop_bootstrap, sources=2) # type: ignore
+
+            if cheq:
+                wu_lam_feed = torch.ones((args.num_envs, 1), device=device)
+                wu_obs_add = cheq_algo_tool.inject_weight_into_state(wu_obs, wu_lam_feed)
+                wu_lam_policy = torch.zeros((args.num_envs, 1), device=device) 
+                next_wu_obs_add = cheq_algo_tool.inject_weight_into_state(next_wu_obs, wu_lam_feed)
+                rb.add(wu_obs_add, next_wu_obs_add, wu_actions, wu_rew, wu_stop_bootstrap, sources=2) # type: ignore
+            else:
+                rb.add(wu_obs, next_wu_obs, wu_actions, wu_rew, wu_stop_bootstrap, sources=2) # type: ignore
             wu_obs = next_wu_obs
         print("✅ Warm‑up policy phase complete.")
 
@@ -770,6 +782,15 @@ if __name__ == "__main__":
 
         demo_loader = DataLoader(ds, batch_size=1, shuffle=True)
         for obs, action, reward, done, next_obs in tqdm.tqdm(demo_loader, desc="feeding RB from demos"):
+
+            if cheq:
+                obs = obs.repeat(args.num_envs, 1)
+                next_obs = next_obs.repeat(args.num_envs, 1)
+                wu_lam_feed = torch.ones((args.num_envs, 1), device=device)
+                obs = cheq_algo_tool.inject_weight_into_state(obs, wu_lam_feed)
+                wu_lam_policy = torch.zeros((args.num_envs, 1), device=device) 
+                next_obs = cheq_algo_tool.inject_weight_into_state(next_obs, wu_lam_feed) 
+
             rb.add(obs, next_obs, action, reward, done, sources=1) # type: ignore
         print("✅ Warm‑up demo phase complete.")
 
