@@ -162,6 +162,7 @@ class Args:
     uhigh: float = 0.15
     lam_low: float = 0.2
     lam_high: float = 1.0
+    p_masking: float =  0.8
 
 @dataclass
 class ReplayBufferSample:
@@ -504,8 +505,8 @@ class CriticEsemble(nn.Module):
         qi = critics[i](obs, actions).view(-1)
         qj = critics[j](obs, actions).view(-1)
         return torch.min(qi, qj)
-    
-    @torch.no_grad()
+
+    @torch.no_grad()    
     def random_close_qf(self, obs_plus_lam, actions):
         k = random.randint(self.min_qfs, len(self.qfs_target))
         idxs = random.sample(range(len(self.qfs_target)), k)
@@ -607,7 +608,7 @@ class CheqAlgorithmTool:
         return q_diff.std(dim=1, unbiased=False)
 
 def algo_selector(algo_num: int) -> tuple[bool, bool, bool, bool]:
-    # wu_demo, WSRL, IBRL
+    # wu_demo, WSRL, IBRL, CHEQ 
     options = {
         1: (False, False, False, False),   #TD3
         2: (True,  False, False, False),   #TD3+wu_demo
@@ -634,7 +635,6 @@ if __name__ == "__main__":
     # add the name label here
 
     wu_demo, wsrl, ibrl, cheq= algo_selector(args.algo_num)
-
     seed = random.randint(1, 10000)
 
     if args.exp_name is None:
@@ -775,7 +775,6 @@ if __name__ == "__main__":
 
     else:
         print("❌ Skipping warm‑up phase.")
-        args.warmup_steps = 0
         
 
     # TRY NOT TO MODIFY: start the game
@@ -860,14 +859,15 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: put action logic here
             if not learning_has_started:
-                if cheq:
-                    a_il = offline_policy(obs)
-                    a_rl = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
-                    lam_val = torch.full((args.num_envs, 1),args.lam_low, device=device)
-                    obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_val)
-                    actions = lam_val * a_rl + (1-lam_val) * a_il
-                else:
-                    actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
+                with torch.no_grad():
+                    if cheq:
+                        a_il = offline_policy(obs)
+                        a_rl = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
+                        lam_val = torch.full((args.num_envs, 1),args.lam_low, device=device)
+                        obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_val)
+                        actions = lam_val * a_rl + (1-lam_val) * a_il
+                    else:
+                        actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
             # ibrl action selection part
             elif ibrl:
                 with torch.no_grad():
@@ -952,6 +952,7 @@ if __name__ == "__main__":
 
         update_time = time.perf_counter()
         learning_has_started = True
+
         for local_update in range(args.grad_steps_per_iteration):
             global_update += 1
             # check it's offline+online or only online run
@@ -976,6 +977,7 @@ if __name__ == "__main__":
 
                 qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), next_max_q_target_val) for qf in qfs]
                 qf_loss_total = torch.stack(qf_losses, dim=0).sum()
+
                 q_optimizer.zero_grad()
                 qf_loss_total.backward()
                 q_optimizer.step() 
@@ -1000,17 +1002,19 @@ if __name__ == "__main__":
             
             elif cheq:
                 with torch.no_grad():
-                    next_action = actor_target(data.obs)
+                    next_action = actor_target(data.next_obs)
                     noise = (torch.randn_like(data.actions) * args.policy_noise).clamp(-args.noise_clip, args.noise_clip)
                     next_action = (next_action + noise).clamp(action_low, action_high)   
-                min_q_val = critic_ensemble.random_close_qf(data.next_obs, next_action)  
-                min_q_target_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * min_q_val
+                    min_q_val = critic_ensemble.random_close_qf(data.next_obs, next_action)  
+                    min_q_target_val = data.rewards.flatten() + (1 - data.dones.flatten()) * args.gamma * min_q_val
 
-                qf_losses = [F.mse_loss(qf(data.obs, data.actions).view(-1), min_q_target_val) for qf in qfs]
+                mask = torch.bernoulli(torch.full((len(qfs),), args.p_masking, device=device))
+                qf_losses = [m * F.mse_loss(qf(data.obs, data.actions).view(-1), min_q_target_val) for m, qf in zip(mask, qfs)]
                 qf_loss_total = torch.stack(qf_losses, dim=0).sum()
+
                 q_optimizer.zero_grad()
-                qf_loss_total.backward(retain_graph=True) 
-                q_optimizer.step()   
+                qf_loss_total.backward()
+                q_optimizer.step()  
 
                 if global_update % args.policy_frequency == 0:
                     pi = actor_policy(data.obs)
