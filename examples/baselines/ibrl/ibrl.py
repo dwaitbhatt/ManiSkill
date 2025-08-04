@@ -144,8 +144,8 @@ class Args:
     """jsrl algo trigger"""
 
     #training sample para, all the prob is the env sample, for sigmoid function
-    final_p: float = 0.99
-    start_p: float = 0.2
+    final_p: float = 0.5
+    start_p: float = 0.5
 
     #sample tag
     sample_mode_original: bool = False
@@ -163,6 +163,8 @@ class Args:
     lam_low: float = 0.2
     lam_high: float = 1.0
     p_masking: float =  0.8
+
+    wandb_video_freq: int = 2
 
 @dataclass
 class ReplayBufferSample:
@@ -623,6 +625,41 @@ def algo_selector(algo_num: int) -> tuple[bool, bool, bool, bool]:
     }
     return options.get(algo_num, (False, False, False, False))
 
+
+
+class RecordEpisodeWandb(RecordEpisode):
+    def __init__(
+        self,
+        env,
+        output_dir: str,
+        wandb_video_freq: Optional[int] = 0,
+        **kwargs,
+    ) -> None:
+        super().__init__(env, output_dir, **kwargs)
+        self.wandb_video_freq = wandb_video_freq
+
+
+    def flush_video(
+        self,
+        name=None,
+        suffix="",
+        verbose=False,
+        ignore_empty_transition=True,
+        save: bool = True,
+    ):
+        super().flush_video(name, suffix, verbose, ignore_empty_transition, save)
+        if save:
+            if name is None:
+                video_name = "{}".format(self._video_id)
+                if suffix:
+                    video_name += "_" + suffix
+            else:
+                video_name = name
+            if self.wandb_video_freq != 0 and self._video_id % self.wandb_video_freq == 0: #type: ignore
+                print(f"Logging video {video_name} to wandb")
+                video_name = video_name.replace(" ", "_").replace("\n", "_") + ".mp4"
+                wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)})
+
 def load_h5_data(data):
     out = dict()
     for k in data.keys():
@@ -670,8 +707,9 @@ if __name__ == "__main__":
         print(f"Saving eval trajectories/videos to {eval_output_dir}")
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
-            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30) # type: ignore
-        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30) # type: ignore
+            envs = RecordEpisodeWandb(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30) # type: ignore
+        eval_envs = RecordEpisodeWandb(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30,
+                                       wandb_video_freq=(args.wandb_video_freq if args.track else 0)) # type: ignore
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -848,6 +886,7 @@ if __name__ == "__main__":
                 mean = torch.stack(v).float().mean()
                 eval_metrics_mean[k] = mean
                 if logger is not None:
+                    print(f"Adding eval logs to wandb at step: {global_step}")
                     logger.add_scalar(f"eval/{k}", mean, global_step)
             pbar.set_description(
                 f"success_once: {eval_metrics_mean['success_once']:.2f}, "
