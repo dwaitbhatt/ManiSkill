@@ -56,7 +56,6 @@ class Args:
     """path to a pretrained checkpoint file to start evaluation/training from"""
     log_freq: int = 1_000
     """logging frequency in terms of environment steps"""
-    wandb_video_freq: int = 2
 
     # Environment specific arguments
     env_id: str = "PickCube-v1"
@@ -916,7 +915,13 @@ if __name__ == "__main__":
                     a_rl = actor_policy(obs_plus_lam)
                     u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
                     lam_val = cheq_algo_tool.get_lambda(u_val)
+
+                    logger.add_scalar("collect phase/u_val", u_val.mean().item(), global_step) # type: ignore
+                    logger.add_scalar("collect phase/lam_val", lam_val.mean().item(), global_step) # type: ignore
+                    
                     actions = lam_val * a_rl + (1-lam_val) * a_il
+                    noise = torch.randn_like(actions) * args.exploration_noise
+                    actions = (actions + noise).clamp(action_low, action_high)
          
             else:
                 with torch.no_grad():
