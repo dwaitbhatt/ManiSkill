@@ -158,13 +158,15 @@ class Args:
     min_q_target: int = 2
 
     #cheq parameter 
-    ulow: float = 0.03
+    ulow: float = 0.005
     uhigh: float = 0.15
     lam_low: float = 0.2
     lam_high: float = 1.0
     p_masking: float =  0.8
 
     wandb_video_freq: int = 2
+
+    action_mixing_trigger: bool = False
 
 @dataclass
 class ReplayBufferSample:
@@ -717,6 +719,7 @@ if __name__ == "__main__":
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     max_episode_steps = gym_utils.find_max_episode_steps_value(envs._env)
+
     logger = None
     if not args.evaluate:
         print("Running training")
@@ -937,14 +940,7 @@ if __name__ == "__main__":
 
                     mask = (q_il > q_rl).unsqueeze(-1) 
                     actions = torch.where(mask, a_il, a_rl)
-            # elif args.algo_jsrl:
-            #     with torch.no_grad():
-            #         a_il = offline_policy(obs)
-            #         a_rl = (actor_policy(obs) + torch.randn_like(actor_policy(obs)) * args.exploration_noise).clamp(action_low, action_high)
 
-            #         js_ratio = global_step/args.total_timesteps
-            #         mask = (torch.rand(len(obs), device=device) < js_ratio)
-            #         actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)  
             elif cheq:
                 with torch.no_grad():
                     obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_vals) # type: ignore
@@ -956,7 +952,10 @@ if __name__ == "__main__":
                     noise = torch.randn_like(actions) * args.exploration_noise
                     actions = (actions + noise).clamp(action_low, action_high)
 
-                    u_val = cheq_algo_tool.compute_u(obs_plus_lam, actions)
+                    if args.action_mixing_trigger:
+                        u_val = cheq_algo_tool.compute_u(obs_plus_lam, actions)
+                    else: 
+                        u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
                     lam_vals = cheq_algo_tool.get_lambda(u_val)
                     logger.add_scalar("collect phase/u_val(t+1)", u_val.mean().item(), global_step) # type: ignore
                     logger.add_scalar("collect phase/lam_val(t+1)", lam_vals.mean().item(), global_step) # type: ignore
