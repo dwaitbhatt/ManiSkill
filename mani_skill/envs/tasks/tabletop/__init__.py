@@ -18,3 +18,4 @@ from .roll_ball import RollBallEnv
 from .push_t import PushTEnv
 from .pull_cube_tool import PullCubeToolEnv
 from .reach import ReachEnv
+from .pick_ycb_custom import PickYCBCustomEnv
