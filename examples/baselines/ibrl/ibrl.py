@@ -588,11 +588,20 @@ class CheqAlgorithmTool:
     def inject_weight_into_state(self, obs, lam):
         return torch.cat([obs, lam], dim=1) #[B, D+1]
     
+    def compute_u(self, obs_plus_lambda, action):
+        # print(f"obs{obs_plus_lam.shape}")
+        # print(f"action{action.shape}")
+        q_diff = torch.stack([qf(obs_plus_lambda, action) for qf in self.qfs], dim=1)
+        return q_diff.std(dim=1, unbiased=False)
+    
     def get_lambda(self, u):
         lam_vals = torch.empty_like(u)
         lower_mask = (u <= self.ulow)
         upper_mask = (u >= self.uhigh)
         mid_mask   = ~(lower_mask | upper_mask)
+
+        # print(f"[get_lambda] lower={lower_mask.sum().item()}  upper={upper_mask.sum().item()}  mid={mid_mask.sum().item()}")
+
 
         lam_vals[lower_mask] = self.lam_high
         lam_vals[upper_mask] = self.lam_low
@@ -602,10 +611,6 @@ class CheqAlgorithmTool:
         lam_vals[mid_mask] = self.lam_low + frac*(self.lam_high - self.lam_low)
 
         return lam_vals  # shape [N,1]    
-
-    def compute_u(self, obs_plus_lambda, action):
-        q_diff = torch.stack([qf(obs_plus_lambda, action) for qf in self.qfs], dim=1)
-        return q_diff.std(dim=1, unbiased=False)
 
 def algo_selector(algo_num: int) -> tuple[bool, bool, bool, bool]:
     # wu_demo, WSRL, IBRL, CHEQ 
@@ -702,11 +707,11 @@ if __name__ == "__main__":
         print(f"Saving eval trajectories/videos to {eval_output_dir}")
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
-            # envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30) # type: ignore 
-            envs = RecordEpisodeWandb(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
-        # eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30) # type: ignore
-        eval_envs = RecordEpisodeWandb(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30,
-                                       wandb_video_freq=(args.wandb_video_freq if args.track else 0)) # type: ignore
+            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30) # type: ignore 
+            # envs = RecordEpisodeWandb(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30) # type: ignore
+        # eval_envs = RecordEpisodeWandb(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30,
+        #                                wandb_video_freq=(args.wandb_video_freq if args.track else 0)) # type: ignore
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -945,15 +950,16 @@ if __name__ == "__main__":
                     obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_vals) # type: ignore
                     a_il = offline_policy(obs)
                     a_rl = actor_policy(obs_plus_lam)
-                    u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
-                    lam_vals = cheq_algo_tool.get_lambda(u_val)
+                    actions = lam_vals * a_rl + (1-lam_vals) * a_il #type: ignore
 
-                    logger.add_scalar("collect phase/u_val", u_val.mean().item(), global_step) # type: ignore
-                    logger.add_scalar("collect phase/lam_val", lam_vals.mean().item(), global_step) # type: ignore
-                    
-                    actions = lam_vals * a_rl + (1-lam_vals) * a_il
+                    logger.add_scalar("collect phase/lam_val(t)", lam_vals.mean().item(), global_step) # type: ignore
                     noise = torch.randn_like(actions) * args.exploration_noise
                     actions = (actions + noise).clamp(action_low, action_high)
+
+                    u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
+                    lam_vals = cheq_algo_tool.get_lambda(u_val)
+                    logger.add_scalar("collect phase/u_val(t+1)", u_val.mean().item(), global_step) # type: ignore
+                    logger.add_scalar("collect phase/lam_val(t+1)", lam_vals.mean().item(), global_step) # type: ignore
          
             else:
                 with torch.no_grad():
