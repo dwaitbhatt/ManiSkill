@@ -956,7 +956,7 @@ if __name__ == "__main__":
                     noise = torch.randn_like(actions) * args.exploration_noise
                     actions = (actions + noise).clamp(action_low, action_high)
 
-                    u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
+                    u_val = cheq_algo_tool.compute_u(obs_plus_lam, actions)
                     lam_vals = cheq_algo_tool.get_lambda(u_val)
                     logger.add_scalar("collect phase/u_val(t+1)", u_val.mean().item(), global_step) # type: ignore
                     logger.add_scalar("collect phase/lam_val(t+1)", lam_vals.mean().item(), global_step) # type: ignore
