@@ -588,20 +588,17 @@ class CheqAlgorithmTool:
     def inject_weight_into_state(self, obs, lam):
         return torch.cat([obs, lam], dim=1) #[B, D+1]
     
-    def remove_weight_in_state(self, obs_plus_lam):
-        return obs_plus_lam[..., :-1]
-    
     def get_lambda(self, u):
         lam_vals = torch.empty_like(u)
         lower_mask = (u <= self.ulow)
         upper_mask = (u >= self.uhigh)
         mid_mask   = ~(lower_mask | upper_mask)
 
-        lam_vals[lower_mask] = self.lam_low
-        lam_vals[upper_mask] = self.lam_high
+        lam_vals[lower_mask] = self.lam_high
+        lam_vals[upper_mask] = self.lam_low
 
         mid_u = u[mid_mask]
-        frac = (mid_u - self.ulow)/(self.uhigh - self.ulow)  # in [0,1]
+        frac = (mid_u - self.uhigh)/(self.ulow - self.uhigh)  # in [0,1]
         lam_vals[mid_mask] = self.lam_low + frac*(self.lam_high - self.lam_low)
 
         return lam_vals  # shape [N,1]    
@@ -624,8 +621,6 @@ def algo_selector(algo_num: int) -> tuple[bool, bool, bool, bool]:
 
     }
     return options.get(algo_num, (False, False, False, False))
-
-
 
 class RecordEpisodeWandb(RecordEpisode):
     def __init__(
@@ -707,9 +702,11 @@ if __name__ == "__main__":
         print(f"Saving eval trajectories/videos to {eval_output_dir}")
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x : (x // args.num_steps) % args.save_train_video_freq == 0
-            envs = RecordEpisodeWandb(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30) # type: ignore
-        eval_envs = RecordEpisodeWandb(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30,
-                                       wandb_video_freq=(args.wandb_video_freq if args.track else 0)) # type: ignore
+            envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30) # type: ignore 
+            # envs = RecordEpisodeWandb(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False, save_video_trigger=save_video_trigger, max_steps_per_video=args.num_steps, video_fps=30)
+        eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30) # type: ignore
+        # eval_envs = RecordEpisodeWandb(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory, save_video=args.capture_video, trajectory_name="trajectory", max_steps_per_video=args.num_eval_steps, video_fps=30,
+        #                                wandb_video_freq=(args.wandb_video_freq if args.track else 0)) # type: ignore
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -798,9 +795,8 @@ if __name__ == "__main__":
                     wu_stop_bootstrap = wu_terminations # only stop bootstrap when terminated, don't stop when truncated
 
             if cheq:
-                wu_lam_feed = torch.ones((args.num_envs, 1), device=device)
+                wu_lam_feed = torch.zeros((args.num_envs, 1), device=device)
                 wu_obs_add = cheq_algo_tool.inject_weight_into_state(wu_obs, wu_lam_feed)
-                wu_lam_policy = torch.zeros((args.num_envs, 1), device=device) 
                 next_wu_obs_add = cheq_algo_tool.inject_weight_into_state(next_wu_obs, wu_lam_feed)
                 rb.add(wu_obs_add, next_wu_obs_add, wu_actions, wu_rew, wu_stop_bootstrap, sources=2) # type: ignore
             else:
@@ -823,9 +819,8 @@ if __name__ == "__main__":
             if cheq:
                 obs = obs.repeat(args.num_envs, 1)
                 next_obs = next_obs.repeat(args.num_envs, 1)
-                wu_lam_feed = torch.ones((args.num_envs, 1), device=device)
+                wu_lam_feed = torch.zeros((args.num_envs, 1), device=device)
                 obs = cheq_algo_tool.inject_weight_into_state(obs, wu_lam_feed)
-                wu_lam_policy = torch.zeros((args.num_envs, 1), device=device) 
                 next_obs = cheq_algo_tool.inject_weight_into_state(next_obs, wu_lam_feed) 
 
             rb.add(obs, next_obs, action, reward, done, sources=1) # type: ignore
@@ -846,6 +841,9 @@ if __name__ == "__main__":
     pbar = tqdm.tqdm(range(args.total_timesteps))
     cumulative_times = defaultdict(float)
 
+    if cheq:
+        lam_vals = torch.full((args.num_envs, 1), args.lam_low, device=device)
+
     while global_step < args.total_timesteps:
 
         # sources tag debugger
@@ -863,15 +861,12 @@ if __name__ == "__main__":
             for _ in range(args.num_eval_steps):
                 with torch.no_grad():
                     if cheq:
-                        lam_eval_feed = torch.ones((args.num_eval_envs, 1), device=device)
-                        obs_plus_lam_eval = cheq_algo_tool.inject_weight_into_state(eval_obs, lam_eval_feed)
+                        eval_lam_vals = torch.full((args.num_eval_envs, 1),lam_vals[0, 0].item(), device=device) # type: ignore
+                        obs_plus_lam_eval = cheq_algo_tool.inject_weight_into_state(eval_obs, eval_lam_vals)
                         eval_a_rl = actor_policy(obs_plus_lam_eval)
                         eval_a_il = offline_policy(eval_obs)
 
-                        eval_u_val = cheq_algo_tool.compute_u(obs_plus_lam_eval, eval_a_rl)
-                        eval_lam_val = cheq_algo_tool.get_lambda(eval_u_val)
-
-                        final_action = eval_lam_val * eval_a_rl + (1 - eval_lam_val) * eval_a_il
+                        final_action = eval_lam_vals * eval_a_rl + (1 - eval_lam_vals) * eval_a_il
 
                         eval_obs, eval_rew, eval_terminations, eval_truncations, eval_infos = eval_envs.step(final_action)
                     else:
@@ -922,9 +917,8 @@ if __name__ == "__main__":
                     if cheq:
                         a_il = offline_policy(obs)
                         a_rl = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
-                        lam_val = torch.full((args.num_envs, 1),args.lam_low, device=device)
-                        obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_val)
-                        actions = lam_val * a_rl + (1-lam_val) * a_il
+                        obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_vals) # type: ignore
+                        actions = lam_vals * a_rl + (1-lam_vals) * a_il # type: ignore
                     else:
                         actions = torch.tensor(envs.action_space.sample(), dtype=torch.float32, device=device)
             # ibrl action selection part
@@ -948,17 +942,16 @@ if __name__ == "__main__":
             #         actions = torch.where(mask.unsqueeze(-1), a_rl, a_il)  
             elif cheq:
                 with torch.no_grad():
-                    lam_feed = torch.ones((args.num_envs, 1), device=device)
-                    obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_feed)
+                    obs_plus_lam = cheq_algo_tool.inject_weight_into_state(obs, lam_vals) # type: ignore
                     a_il = offline_policy(obs)
                     a_rl = actor_policy(obs_plus_lam)
                     u_val = cheq_algo_tool.compute_u(obs_plus_lam, a_rl)
-                    lam_val = cheq_algo_tool.get_lambda(u_val)
+                    lam_vals = cheq_algo_tool.get_lambda(u_val)
 
                     logger.add_scalar("collect phase/u_val", u_val.mean().item(), global_step) # type: ignore
-                    logger.add_scalar("collect phase/lam_val", lam_val.mean().item(), global_step) # type: ignore
+                    logger.add_scalar("collect phase/lam_val", lam_vals.mean().item(), global_step) # type: ignore
                     
-                    actions = lam_val * a_rl + (1-lam_val) * a_il
+                    actions = lam_vals * a_rl + (1-lam_vals) * a_il
                     noise = torch.randn_like(actions) * args.exploration_noise
                     actions = (actions + noise).clamp(action_low, action_high)
          
@@ -999,7 +992,7 @@ if __name__ == "__main__":
                 for k, v in final_info["episode"].items():
                     logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step) # type: ignore
             if cheq:
-                next_obs_plus_lam = cheq_algo_tool.inject_weight_into_state(real_next_obs, lam_val)# type: ignore
+                next_obs_plus_lam = cheq_algo_tool.inject_weight_into_state(real_next_obs, lam_vals)# type: ignore
                 rb.add(obs_plus_lam, next_obs_plus_lam, actions, rewards, stop_bootstrap, sources=0)# type: ignore
             else:
                 rb.add(obs, real_next_obs, actions, rewards, stop_bootstrap, sources=0) # type: ignore
