@@ -660,7 +660,7 @@ class RecordEpisodeWandb(RecordEpisode):
             if self.wandb_video_freq != 0 and self._video_id % self.wandb_video_freq == 0: #type: ignore
                 print(f"Logging video {video_name} to wandb")
                 video_name = video_name.replace(" ", "_").replace("\n", "_") + ".mp4"
-                wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)})
+                wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)}, step=self._video_id)
 
 def load_h5_data(data):
     out = dict()
