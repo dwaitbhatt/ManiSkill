@@ -660,7 +660,7 @@ class RecordEpisodeWandb(RecordEpisode):
             if self.wandb_video_freq != 0 and self._video_id % self.wandb_video_freq == 0: #type: ignore
                 print(f"Logging video {video_name} to wandb")
                 video_name = video_name.replace(" ", "_").replace("\n", "_") + ".mp4"
-                wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)}, step=self._video_id)
+                wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)}, step=global_step) # add step
 
 def load_h5_data(data):
     out = dict()
@@ -889,7 +889,6 @@ if __name__ == "__main__":
                 mean = torch.stack(v).float().mean()
                 eval_metrics_mean[k] = mean
                 if logger is not None:
-                    print(f"Adding eval logs to wandb at step: {global_step}")
                     logger.add_scalar(f"eval/{k}", mean, global_step)
             pbar.set_description(
                 f"success_once: {eval_metrics_mean['success_once']:.2f}, "
