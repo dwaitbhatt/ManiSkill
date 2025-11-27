@@ -40,7 +40,8 @@ imgui.ini
 *logs*
 *outputs*
 * copy*
-*venv*
+saved_observations/
+mani_skill/assets/robots/reachy/
 
 # benchmarking
 /benchmark_results
