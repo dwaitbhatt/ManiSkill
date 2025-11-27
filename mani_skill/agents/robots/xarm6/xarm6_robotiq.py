@@ -451,3 +451,13 @@ class XArm6RobotiqWristCamera(XArm6Robotiq):
                 mount=self.robot.links_map["camera_link"],
             )
         ]
+
+
+@register_agent(asset_download_ids=["xarm6"])
+class XArm6RobotiqCustom(XArm6Robotiq):
+    uid = "xarm6_robotiq_custom"
+    def get_proprioception(self):
+        obs = super().get_proprioception()
+        obs["qpos"] = obs["qpos"][..., :6]
+        obs["qvel"] = obs["qvel"][..., :6]
+        return obs

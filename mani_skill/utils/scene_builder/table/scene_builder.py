@@ -128,6 +128,7 @@ class TableSceneBuilder(SceneBuilder):
             "xarm6_allegro_left",
             "xarm6_allegro_right",
             "xarm6_robotiq",
+            "xarm6_robotiq_custom",
             "xarm6_nogripper",
         ]:
             qpos = self.env.agent.keyframes["rest"].qpos

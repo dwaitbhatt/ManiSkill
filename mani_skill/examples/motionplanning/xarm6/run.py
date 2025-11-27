@@ -13,6 +13,7 @@ from mani_skill.examples.motionplanning.xarm6.solutions import solvePickCube, so
 
 MP_SOLUTIONS = {
     "PickCube-v1": solvePickCube,
+    "PickCubeCustom-v1": solvePickCube,
     "PushCube-v1": solvePushCube,
     "StackCube-v1": solveStackCube,
     "PlugCharger-v1": solvePlugCharger,
@@ -21,6 +22,7 @@ MP_SOLUTIONS = {
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--env-id", type=str, default="PickCube-v1", help=f"Environment to run motion planning solver on. Available options are {list(MP_SOLUTIONS.keys())}")
+    parser.add_argument("-r", "--robot-uid", type=str, default="xarm6_robotiq", help="Robot uid to use. Available options are xarm6_robotiq and xarm6_robotiq_custom")
     parser.add_argument("-o", "--obs-mode", type=str, default="none", help="Observation mode to use. Usually this is kept as 'none' as observations are not necesary to be stored, they can be replayed later via the mani_skill.trajectory.replay_trajectory script.")
     parser.add_argument("-n", "--num-traj", type=int, default=10, help="Number of trajectories to generate.")
     parser.add_argument("--only-count-success", action="store_true", help="If true, generates trajectories until num_traj of them are successful and only saves the successful trajectories/videos")
@@ -37,12 +39,13 @@ def parse_args(args=None):
 
 def _main(args, proc_id: int = 0, start_seed: int = 0) -> str:
     env_id = args.env_id
+    assert args.robot_uid in ["xarm6_robotiq", "xarm6_robotiq_custom"], "Robot uid must be either xarm6_robotiq or xarm6_robotiq_custom"
     env = gym.make(
         env_id,
         obs_mode=args.obs_mode,
         control_mode="pd_joint_pos",
         render_mode=args.render_mode,
-        robot_uids="xarm6_robotiq",
+        robot_uids=args.robot_uid,
         reward_mode="dense" if args.reward_mode is None else args.reward_mode,
         sensor_configs=dict(shader_pack=args.shader),
         human_render_camera_configs=dict(shader_pack=args.shader),

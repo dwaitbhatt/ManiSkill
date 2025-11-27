@@ -44,3 +44,9 @@ imgui.ini
 # testing
 .coverage*
 htmlcov/
+
+*wandb/
+*runs/
+*tdmpc2 copy/
+saved_observations/
+*.stl

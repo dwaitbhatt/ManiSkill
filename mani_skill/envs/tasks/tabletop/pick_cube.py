@@ -214,3 +214,20 @@ class PickCubeWidowXAIEnv(PickCubeEnv):
 
 
 PickCubeWidowXAIEnv.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="WidowXAI")
+
+
+@register_env("PickCubeCustom-v1", max_episode_steps=100)
+class PickCubeCustomEnv(PickCubeEnv):
+    def _get_obs_extra(self, info):
+        obs = dict(
+            is_grasped=info["is_grasped"],
+            # tcp_pose=self.agent.tcp_pose.raw_pose,
+            # goal_pos=self.goal_site.pose.p,
+        )
+        if "state" in self.obs_mode:
+            obs.update(
+                # obj_pose=self.cube.pose.raw_pose,
+                tcp_to_obj_pos=self.cube.pose.p - self.agent.tcp_pose.p,
+                obj_to_goal_pos=self.goal_site.pose.p - self.cube.pose.p,
+            )
+        return obs

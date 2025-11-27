@@ -29,12 +29,15 @@ from act.detr.transformer import build_transformer
 from act.detr.detr_vae import build_encoder, DETRVAE
 from dataclasses import dataclass, field
 from typing import Optional, List
+from tqdm.auto import tqdm
 import tyro
 
 @dataclass
 class Args:
     exp_name: Optional[str] = None
     """the name of this experiment"""
+    exp_suffix: Optional[str] = None
+    """the suffix of the experiment name"""
     seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
@@ -43,15 +46,19 @@ class Args:
     """if toggled, cuda will be enabled by default"""
     track: bool = False
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "ManiSkill"
+    wandb_project_name: str = "maniskill_experiments"
     """the wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: Optional[str] = "ucsd_erl"
     """the entity (team) of wandb's project"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    wandb_video_freq: int = 10
+    """the frequency of logging videos to wandb"""
 
     env_id: str = "PickCube-v1"
     """the id of the environment"""
+    robot_uid: str = "xarm6_robotiq_custom"
+    """the uid of the robot"""
     demo_path: str = 'pickcube.trajectory.state.pd_joint_delta_pos.cpu.h5'
     """the path of demo dataset (pkl or h5)"""
     num_demos: Optional[int] = None
@@ -126,7 +133,7 @@ class SmallDemoDataset_ACTPolicy(Dataset): # Load everything into GPU memory
                 trajectories[k][i] = torch.Tensor(v[i]).to(device)
 
         # When the robot reaches the goal state, its joints and gripper fingers need to remain stationary
-        if 'delta_pos' in args.control_mode or args.control_mode == 'base_pd_joint_vel_arm_pd_joint_vel':
+        if 'delta_pos' in args.control_mode or args.control_mode == 'base_pd_joint_vel_arm_pd_joint_vel' or args.control_mode == 'pd_joint_vel':
             self.pad_action_arm = torch.zeros((trajectories['actions'][0].shape[1]-1,), device=device)
             # to make the arm stay still, we pad the action with 0 in 'delta_pos' control mode
             # gripper action needs to be copied from the last action
@@ -159,7 +166,7 @@ class SmallDemoDataset_ACTPolicy(Dataset): # Load everything into GPU memory
 
         # Pad after the trajectory, so all the observations are utilized in training
         if action_len < self.num_queries:
-            if 'delta_pos' in args.control_mode or args.control_mode == 'base_pd_joint_vel_arm_pd_joint_vel':
+            if 'delta_pos' in args.control_mode or args.control_mode == 'base_pd_joint_vel_arm_pd_joint_vel' or args.control_mode == 'pd_joint_vel':
                 gripper_action = act_seq[-1, -1]
                 pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
                 act_seq = torch.cat([act_seq, pad_action.repeat(self.num_queries-action_len, 1)], dim=0)
@@ -182,33 +189,19 @@ class SmallDemoDataset_ACTPolicy(Dataset): # Load everything into GPU memory
         return len(self.slices)
 
     def get_norm_stats(self):
-        traj_idx, ts = self.slices[index]
+        obs_tensor = torch.cat(self.trajectories['observations'], dim=0)
+        action_tensor = torch.cat(self.trajectories['actions'], dim=0)
 
-        # get observation at start_ts only
-        obs = self.trajectories['observations'][traj_idx][ts]
-        # get num_queries actions
-        act_seq = self.trajectories['actions'][traj_idx][ts:ts+self.num_queries]
-        action_len = act_seq.shape[0]
-
-        # Pad after the trajectory, so all the observations are utilized in training
-        if action_len < self.num_queries:
-            if 'delta_pos' in args.control_mode or args.control_mode == 'base_pd_joint_vel_arm_pd_joint_vel':
-                gripper_action = act_seq[-1, -1]
-                pad_action = torch.cat((self.pad_action_arm, gripper_action[None]), dim=0)
-                act_seq = torch.cat([act_seq, pad_action.repeat(self.num_queries-action_len, 1)], dim=0)
-                # making the robot (arm and gripper) stay still
-            elif not self.delta_control:
-                target = act_seq[-1]
-                act_seq = torch.cat([act_seq, target.repeat(self.num_queries-action_len, 1)], dim=0)
-
-        # normalize obs and act_seq
-        if not self.delta_control:
-            obs = (obs - self.norm_stats["state_mean"][0]) / self.norm_stats["state_std"][0]
-            act_seq = (act_seq - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
+        state_mean = obs_tensor.mean(dim=0, keepdim=True)
+        state_std = obs_tensor.std(dim=0, unbiased=False, keepdim=True).clamp_min(1e-6)
+        action_mean = action_tensor.mean(dim=0)
+        action_std = action_tensor.std(dim=0, unbiased=False).clamp_min(1e-6)
 
         return {
-            'observations': obs,
-            'actions': act_seq,
+            'state_mean': state_mean,
+            'state_std': state_std,
+            'action_mean': action_mean,
+            'action_std': action_std,
         }
 
 
@@ -292,7 +285,7 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]
-        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+        run_name = f"{args.env_id}___{args.robot_uid}___{args.exp_name}__{args.exp_suffix}__{args.seed}__{int(time.time())}"
     else:
         run_name = args.exp_name
 
@@ -318,11 +311,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    env_kwargs = dict(control_mode=args.control_mode, reward_mode="sparse", obs_mode="state", render_mode="rgb_array")
+    env_kwargs = dict(robot_uids=args.robot_uid, control_mode=args.control_mode, reward_mode="sparse", obs_mode="state", render_mode="rgb_array")
     if args.max_episode_steps is not None:
         env_kwargs["max_episode_steps"] = args.max_episode_steps
     other_kwargs = None
-    envs = make_eval_envs(args.env_id, args.num_eval_envs, args.sim_backend, env_kwargs, other_kwargs, video_dir=f'runs/{run_name}/videos' if args.capture_video else None)
+    envs = make_eval_envs(args.env_id, args.num_eval_envs, args.sim_backend, env_kwargs, other_kwargs, video_dir=f'runs/{run_name}/videos' if args.capture_video else None, wandb_video_freq=args.wandb_video_freq)
 
     # dataloader setup
     dataset = SmallDemoDataset_ACTPolicy(args.demo_path, args.num_queries, device, num_traj=args.num_demos)
@@ -349,7 +342,7 @@ if __name__ == "__main__":
             config=config,
             name=run_name,
             save_code=True,
-            group="ACT",
+            group=run_name,
             tags=["act"]
         )
     writer = SummaryWriter(f"runs/{run_name}")
@@ -400,6 +393,7 @@ if __name__ == "__main__":
     best_eval_metrics = defaultdict(float)
     timings = defaultdict(float)
 
+    pbar = tqdm(total=args.total_iters)
     for cur_iter, data_batch in enumerate(train_dataloader):
         last_tick = time.time()
         # forward and compute loss
@@ -443,7 +437,7 @@ if __name__ == "__main__":
                     print(f'New best {k}_rate: {eval_metrics[k]:.4f}. Saving checkpoint.')
 
         if cur_iter % args.log_freq == 0:
-            print(f"Iteration {cur_iter}, loss: {total_loss.item()}")
+            # print(f"Iteration {cur_iter}, loss: {total_loss.item()}")
             writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], cur_iter)
             writer.add_scalar("losses/total_loss", total_loss.item(), cur_iter)
             for k, v in timings.items():
@@ -451,6 +445,10 @@ if __name__ == "__main__":
         # Checkpoint
         if args.save_freq is not None and cur_iter % args.save_freq == 0:
             save_ckpt(run_name, str(cur_iter))
+        
+        pbar.update(1)
+        pbar.set_postfix({"loss": total_loss.item()})
+
 
     envs.close()
     writer.close()

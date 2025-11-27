@@ -6,7 +6,7 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from mani_skill.utils.wrappers import RecordEpisode, CPUGymWrapper
 
 
-def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, other_kwargs: dict, video_dir: Optional[str] = None, wrappers: list[gym.Wrapper] = []):
+def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, other_kwargs: dict, video_dir: Optional[str] = None, wrappers: list[gym.Wrapper] = [], wandb_video_freq: int = 10):
     """Create vectorized environment for evaluation and/or recording videos.
     For CPU vectorized environments only the first parallel environment is used to record videos.
     For GPU vectorized environments all parallel environments are used to record videos.
@@ -18,6 +18,7 @@ def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, ot
         env_kwargs: the environment kwargs. You can also pass in max_episode_steps in env_kwargs to override the default max episode steps for the environment.
         video_dir: the directory to save the videos. If None no videos are recorded.
         wrappers: the list of wrappers to apply to the environment.
+        wandb_video_freq: the frequency of logging videos to wandb.
     """
     if sim_backend == "physx_cpu":
         def cpu_make_env(env_id, seed, video_dir=None, env_kwargs = dict(), other_kwargs = dict()):
@@ -27,7 +28,7 @@ def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, ot
                     env = wrapper(env)
                 env = CPUGymWrapper(env, ignore_terminations=True, record_metrics=True)
                 if video_dir:
-                    env = RecordEpisode(env, output_dir=video_dir, save_trajectory=False, info_on_video=True, source_type="act", source_desc="act evaluation rollout")
+                    env = RecordEpisode(env, output_dir=video_dir, save_trajectory=False, info_on_video=True, source_type="act", source_desc="act evaluation rollout", wandb_video_freq=wandb_video_freq)
                 env.action_space.seed(seed)
                 env.observation_space.seed(seed)
                 return env
@@ -41,6 +42,6 @@ def make_eval_envs(env_id, num_envs: int, sim_backend: str, env_kwargs: dict, ot
         for wrapper in wrappers:
             env = wrapper(env)
         if video_dir:
-            env = RecordEpisode(env, output_dir=video_dir, save_trajectory=False, save_video=True, source_type="act", source_desc="act evaluation rollout", max_steps_per_video=max_episode_steps)
+            env = RecordEpisode(env, output_dir=video_dir, save_trajectory=False, save_video=True, source_type="act", source_desc="act evaluation rollout", max_steps_per_video=max_episode_steps, wandb_video_freq=wandb_video_freq)
         env = ManiSkillVectorEnv(env, ignore_terminations=True, record_metrics=True)
     return env

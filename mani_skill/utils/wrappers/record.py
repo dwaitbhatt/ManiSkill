@@ -2,13 +2,14 @@ import copy
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import gymnasium as gym
 import h5py
 import numpy as np
 import sapien.physx as physx
 import torch
+import wandb
 
 from mani_skill import get_commit_info
 from mani_skill.envs.sapien_env import BaseEnv
@@ -119,21 +120,21 @@ class RecordEpisode(gym.Wrapper):
 
     Each JSON file contains:
 
-    - `env_info` (dict): task (also known as environment) information, which can be used to initialize the task
+    - `env_info` (Dict): task (also known as environment) information, which can be used to initialize the task
     - `env_id` (str): task id
     - `max_episode_steps` (int)
-    - `env_kwargs` (dict): keyword arguments to initialize the task. **Essential to recreate the environment.**
-    - `episodes` (list[dict]): episode information
+    - `env_kwargs` (Dict): keyword arguments to initialize the task. **Essential to recreate the environment.**
+    - `episodes` (List[Dict]): episode information
     - `source_type` (Optional[str]): a simple category string describing what process generated the trajectory data. ManiSkill official datasets will usually write one of "human", "motionplanning", or "rl" at the moment.
     - `source_desc` (Optional[str]): a longer explanation of how the data was generated.
 
     The episode information (the element of `episodes`) includes:
 
     - `episode_id` (int): a unique id to index the episode
-    - `reset_kwargs` (dict): keyword arguments to reset the task. **Essential to reproduce the trajectory.**
+    - `reset_kwargs` (Dict): keyword arguments to reset the task. **Essential to reproduce the trajectory.**
     - `control_mode` (str): control mode used for the episode.
     - `elapsed_steps` (int): trajectory length
-    - `info` (dict): information at the end of the episode.
+    - `info` (Dict): information at the end of the episode.
 
     With just the meta data, you can reproduce the task the same way it was created when the trajectories were collected as so:
 
@@ -232,6 +233,7 @@ class RecordEpisode(gym.Wrapper):
         avoid_overwriting_video: bool = False,
         source_type: Optional[str] = None,
         source_desc: Optional[str] = None,
+        wandb_video_freq: Optional[int] = 0,
     ) -> None:
         super().__init__(env)
 
@@ -290,6 +292,7 @@ class RecordEpisode(gym.Wrapper):
         self.render_images = []
         self.video_nrows = int(np.sqrt(self.unwrapped.num_envs))
         self._avoid_overwriting_video = avoid_overwriting_video
+        self.wandb_video_freq = wandb_video_freq
 
         self._already_warned_about_state_dict_inconsistency = False
 
@@ -356,23 +359,21 @@ class RecordEpisode(gym.Wrapper):
     def reset(
         self,
         *args,
-        seed: Optional[Union[int, list[int]]] = None,
-        options: Optional[dict] = None,
-        save=True,
+        seed: Optional[Union[int, List[int]]] = None,
+        options: Optional[dict] = dict(),
         **kwargs,
     ):
+
         if self.save_on_reset:
             if self.save_video and self.num_envs == 1:
-                self.flush_video(save=save)
+                self.flush_video()
             # if doing a full reset then we flush all trajectories including incompleted ones
             if self._trajectory_buffer is not None:
-                if options is None or "env_idx" not in options:
-                    self.flush_trajectory(
-                        env_idxs_to_flush=np.arange(self.num_envs), save=save
-                    )
+                if "env_idx" not in options:
+                    self.flush_trajectory(env_idxs_to_flush=np.arange(self.num_envs))
                 else:
                     self.flush_trajectory(
-                        env_idxs_to_flush=common.to_numpy(options["env_idx"]), save=save
+                        env_idxs_to_flush=common.to_numpy(options["env_idx"])
                     )
 
         obs, info = super().reset(*args, seed=seed, options=options, **kwargs)
@@ -417,7 +418,7 @@ class RecordEpisode(gym.Wrapper):
             if self.record_env_state:
                 first_step.state = common.to_numpy(common.batch(state_dict))
             env_idx = np.arange(self.num_envs)
-            if options is not None and "env_idx" in options:
+            if "env_idx" in options:
                 env_idx = common.to_numpy(options["env_idx"])
             if self._trajectory_buffer is None:
                 # Initialize trajectory buffer on the first episode based on given observation (which should be generated after all wrappers)
@@ -801,6 +802,10 @@ class RecordEpisode(gym.Wrapper):
                 fps=self.video_fps,
                 verbose=verbose,
             )
+            if self.wandb_video_freq != 0 and self._video_id % self.wandb_video_freq == 0:
+                # print(f"Logging video {video_name} to wandb")
+                video_name = video_name.replace(" ", "_").replace("\n", "_") + ".mp4"
+                wandb.log({"video": wandb.Video(f"{self.output_dir}/{video_name}", fps=self.video_fps)})
         self._video_steps = 0
         self.render_images = []
 
