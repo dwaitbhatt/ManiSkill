@@ -9,7 +9,7 @@ from tqdm import tqdm
 import os.path as osp
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.trajectory.merge_trajectory import merge_trajectories
-from mani_skill.examples.motionplanning.xarm6.solutions import solvePickCube, solvePushCube, solveStackCube, solvePlugCharger
+from mani_skill.examples.motionplanning.xarm6.solutions import solvePickCube, solvePushCube, solveStackCube, solvePlugCharger, solvePlaceCube
 
 MP_SOLUTIONS = {
     "PickCube-v1": solvePickCube,
@@ -17,6 +17,7 @@ MP_SOLUTIONS = {
     "PushCube-v1": solvePushCube,
     "StackCube-v1": solveStackCube,
     "PlugCharger-v1": solvePlugCharger,
+    "PlaceCube-v1": solvePlaceCube,
 }
 
 def parse_args(args=None):
