@@ -7,7 +7,7 @@ import sapien
 import torch
 import torch.random
 
-from mani_skill.agents.robots import Fetch, Panda, XArm6Robotiq
+from mani_skill.agents.robots import Panda, XArm6Robotiq
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import sapien_utils
@@ -193,7 +193,7 @@ class PlaceCubeEnv(BaseEnv):
         pos_obj = self.obj.pose.p
         pos_bin = self.bin.pose.p
         offset = pos_obj - pos_bin
-        xy_flag = torch.linalg.norm(offset[..., :2], axis=1) <= 0.005
+        xy_flag = torch.linalg.norm(offset[..., :2], axis=1) <= 0.05
         entering_bin_z_flag = (
             offset[..., 2] - self.cube_half_length - self.short_side_half_size < 4 * self.short_side_half_size 
         )
@@ -218,14 +218,15 @@ class PlaceCubeEnv(BaseEnv):
     def _get_obs_extra(self, info: Dict):
         # Only keep observables that are easy to get in the real world
         obs = dict(
-            # is_grasped=info["is_obj_grasped"],
+            is_grasped=info["is_obj_grasped"],
             # tcp_pose=self.agent.tcp.pose.raw_pose,
-            bin_pos=self.bin.pose.p,
+            # bin_pos=self.bin.pose.p,
         )
         if "state" in self.obs_mode:
             obs.update(
                 # obj_pose=self.obj.pose.raw_pose,
                 tcp_to_obj_pos=self.obj.pose.p - self.agent.tcp.pose.p,
+                obj_to_bin_pos=self.bin.pose.p - self.obj.pose.p,
             )
         return obs
 
