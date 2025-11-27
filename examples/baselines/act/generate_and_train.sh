@@ -19,7 +19,7 @@ do
 
   # Train ACT policy
   python train.py --env-id $env_id --robot_uid $XARM_UID \
-    --demo-path demos/$env_id/motionplanning/$XARM_UID/ \
+    --demo-path demos/$env_id/motionplanning/$XARM_UID/trajectory.state.pd_joint_vel.physx_cpu.h5 \
     --control-mode $CONTROL_MODE --sim-backend "gpu" --num_demos 1000 --max_episode_steps 100 --num_eval_envs 30 \
     --total_iters 200000 --log_freq 100 --eval_freq 5000 --wandb_video_freq 1 \
     --exp-name=act-PickCube-v1-xarm6_robotiq-state-1000_motionplanning_demos-1 \

@@ -89,12 +89,12 @@ spec:
         resources:
           limits:
             nvidia.com/gpu: "1"
-            memory: "64G"
-            cpu: "32"
+            memory: "32G"
+            cpu: "2"
           requests:
             nvidia.com/gpu: "1"
-            memory: "50G"
-            cpu: "24"
+            memory: "28G"
+            cpu: "2"
       affinity:
         # nodeAffinity:
         # nodeSelectorTerms:

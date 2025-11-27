@@ -16,23 +16,24 @@ import tyro
 from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Literal
 
 class Algorithm(str, Enum):
     SAC = "SAC"
     PPO = "PPO"
     DUMMY = "DUMMY"
+    ACT = "ACT"
 
 @dataclass
 class NautilusPodConfig:
     """Configuration for launching Nautilus pods with different random seeds."""
     
-    algo: Annotated[Algorithm, 
+    algo: Annotated[Literal["SAC", "PPO", "DUMMY", "ACT"], 
                     tyro.conf.arg(
                         name="algo", 
                         help="Algorithm to use (SAC, PPO, DUMMY, case-sensitive)",
                         aliases=["-a"]
-                    )] = "SAC"
+                    )] = "ACT"
     
     robot: Annotated[str, 
                     tyro.conf.arg(
@@ -47,6 +48,13 @@ class NautilusPodConfig:
                         help="Environment ID (e.g., PickCube-v1)",
                         aliases=["-e"]
                     )] = "PickCube-v1"
+
+    control_mode: Annotated[str, 
+                            tyro.conf.arg(
+                                name="control_mode", 
+                                help="Control mode to use (e.g., pd_joint_vel)",
+                                aliases=["-c"]
+                            )] = "pd_joint_vel"
     
     exp_suffix: Annotated[str, 
                         tyro.conf.arg(
@@ -60,21 +68,21 @@ class NautilusPodConfig:
                                   name="total_timesteps", 
                                   help="Total timesteps (e.g., 1_000_000)",
                                   aliases=["-t"]
-                              )] = "1_000_000"
+                              )] = "200_000"
     
     branch: Annotated[str, 
                     tyro.conf.arg(
                         name="branch", 
                         help="Git branch to use for the experiment",
                         aliases=["-b"]
-                    )] = "main"
+                    )] = "act"
     
     num_pods: Annotated[int, 
                         tyro.conf.arg(
                             name="num_pods", 
                             help="Number of pods to launch",
                             aliases=["-n"]
-                        )] = 4
+                        )] = 1
 
     jobs: Annotated[bool, 
                     tyro.conf.arg(
@@ -104,17 +112,17 @@ class NautilusPodConfig:
     Format: '--arg1 value1 --arg2 value2' or '--arg1=value1 --arg2=value2'."""
 
 
-def generate_experiment_name(env_id: str, robot: str, algo: Algorithm, suffix: str = "") -> str:
+def generate_experiment_name(env_id: str, robot: str, control_mode: str, algo: Literal["SAC", "PPO", "DUMMY", "ACT"], suffix: str = "") -> str:
     """Generate a standard experiment name from environment, robot, algorithm, and optional suffix."""
     env_name = env_id.split('-')[0]
-    exp_name = f"{env_name}_{robot}_{algo.value}"
+    exp_name = f"{env_name}-{robot}-{control_mode}-{algo}"
     if suffix:
-        exp_name = f"{exp_name}_{suffix}"
+        exp_name = f"{exp_name}-{suffix}"
     
     return exp_name
 
 
-def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str, 
+def generate_command(algo: Literal["SAC", "PPO", "DUMMY", "ACT"], robot: str, env_id: str, control_mode: str, exp_name: str, 
                     total_timesteps: str, seed: int, branch: str,
                     wandb_entity: str, wandb_project: str, run_name: str,
                     extra_cmd_args: str = "",
@@ -164,7 +172,7 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             **wandb_args,
             'env_id': env_id,
             'robot': robot,
-            'control_mode': 'pd_joint_vel',
+            'control_mode': control_mode,
             'gamma': 0.95,
             'num_envs': '128',
             'training_freq': '128',
@@ -176,7 +184,7 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         cmd_args.update(extra_args_dict)
         args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
         main_cmd = f'''echo y | python examples/baselines/sac/sac.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log'''
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo}.log'''
 
     elif algo == Algorithm.PPO:
         # Base arguments for PPO
@@ -184,7 +192,7 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
             **wandb_args,
             'env_id': env_id,
             'robot_uids': robot,
-            'control_mode': 'pd_joint_vel',
+            'control_mode': control_mode,
             'seed': str(seed),
             'num_envs': '512',
             'num_eval_envs': '8',
@@ -204,8 +212,32 @@ def generate_command(algo: Algorithm, robot: str, env_id: str, exp_name: str,
         # Build the command string
         args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
         main_cmd = f'''pip install tensordict && echo y | python examples/baselines/ppo/ppo_fast.py {args_str} \\
-                    > /pers_vol/dwait/logs/{timestamp_log}-{algo.value}.log''' 
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo}.log''' 
     
+    elif algo == Algorithm.ACT:
+        cmd_args = {
+            **wandb_args,
+            'env_id': env_id,
+            'robot_uid': robot,
+            'demo_path': f'/pers_vol/dwait/saved_demos/demos/{env_id}/motionplanning/{robot}/trajectory.state.pd_joint_vel.physx_cpu.h5',
+            'control_mode': control_mode,
+            'sim_backend': 'gpu',
+            'num_demos': '1000',
+            'max_episode_steps': '100',
+            'num_eval_envs': '30',
+            'total_iters': total_timesteps,
+            'log_freq': '100',
+            'eval_freq': '5000',
+            'wandb_video_freq': '1',
+            'demo_type': 'motionplanning'
+        }
+        cmd_args.update(extra_args_dict)
+
+        args_str = ' '.join([f'--{k}={v}' if v is not True else f'--{k}' for k, v in cmd_args.items()])
+        main_cmd = f'''pip install torchvision diffusers && \\
+                    echo y | python examples/baselines/act/train.py {args_str} \\
+                    > /pers_vol/dwait/logs/{timestamp_log}-{algo}.log'''
+
     elif algo == Algorithm.DUMMY:
         main_cmd = "sleep infinity"
 
@@ -242,7 +274,7 @@ def launch_pod(yaml_file: str, pod_name: str, command: str, jobs: bool = False) 
 def main() -> None:
     config = tyro.cli(NautilusPodConfig)
 
-    exp_name = generate_experiment_name(config.env_id, config.robot, config.algo, config.exp_suffix)
+    exp_name = generate_experiment_name(config.env_id, config.robot, config.control_mode, config.algo, config.exp_suffix)
     
     timestamp = datetime.now().strftime("%m%d-%H%M")
 
@@ -253,7 +285,7 @@ def main() -> None:
         yaml_file = config.yaml_file
     
     print(f"Launching {nautilus_type}s with the following configuration:")
-    print(f"  Algorithm: {config.algo.value}")
+    print(f"  Algorithm: {config.algo}")
     print(f"  Robot: {config.robot}")
     print(f"  Environment: {config.env_id}")
     print(f"  Experiment name: {exp_name}")
@@ -282,10 +314,10 @@ def main() -> None:
         
         # Run name format: [env]_[robot]_[algo]_[suffix]_seed[seed]
         env_short = config.env_id.split('-')[0].lower()  # Use just the env name without version
-        run_name = f"{env_short}_{config.robot}_{config.algo.value}_{config.exp_suffix}_seed{seed}"
+        run_name = f"{env_short}_{config.robot}_{config.control_mode}_{config.algo}_{config.exp_suffix}_seed{seed}"
         
         command = generate_command(
-            config.algo, config.robot, config.env_id, exp_name, 
+            config.algo, config.robot, config.env_id, config.control_mode, exp_name, 
             config.total_timesteps, seed, config.branch,
             config.wandb_entity, config.wandb_project, run_name,
             extra_cmd_args=config.extra,

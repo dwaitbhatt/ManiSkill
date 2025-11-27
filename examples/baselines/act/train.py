@@ -50,12 +50,14 @@ class Args:
     """the wandb's project name"""
     wandb_entity: Optional[str] = "ucsd_erl"
     """the entity (team) of wandb's project"""
+    wandb_group: Optional[str] = None
+    """the group of the experiment"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     wandb_video_freq: int = 10
     """the frequency of logging videos to wandb"""
 
-    env_id: str = "PickCube-v1"
+    env_id: str = "PickCubeCustom-v1"
     """the id of the environment"""
     robot_uid: str = "xarm6_robotiq_custom"
     """the uid of the robot"""
@@ -342,7 +344,7 @@ if __name__ == "__main__":
             config=config,
             name=run_name,
             save_code=True,
-            group=run_name,
+            group=args.wandb_group,
             tags=["act"]
         )
     writer = SummaryWriter(f"runs/{run_name}")
