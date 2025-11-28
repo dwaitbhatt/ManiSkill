@@ -59,14 +59,14 @@ def solve(env: PlaceCubeEnv, seed=None, debug=False, vis=False):
     # # -------------------------------------------------------------------------- #
     # # Move above bin
     # # -------------------------------------------------------------------------- #
-    position_above_bin = env.bin.pose.sp.p + np.array([0, 0, env.short_side_half_size + 4 * env.cube_half_length + 4 * env.short_side_half_size])
+    position_above_bin = env.bin.pose.sp.p + np.array([0, 0, env.bin_wall_half_thickness + env.bin_wall_height + 4 * env.cube_half_length])
     above_bin_pose = sapien.Pose(position_above_bin, grasp_pose.q)
     planner.move_to_pose_with_RRTStar(above_bin_pose)
 
     # # -------------------------------------------------------------------------- #
     # # Move down
     # # # -------------------------------------------------------------------------- #
-    position_inside_bin = env.bin.pose.sp.p + np.array([0, 0, env.short_side_half_size + env.cube_half_length + 0.01])
+    position_inside_bin = env.bin.pose.sp.p + np.array([0, 0, env.bin_wall_half_thickness + env.cube_half_length + 0.01])
     inside_bin_pose = sapien.Pose(position_inside_bin, grasp_pose.q)
     planner.move_to_pose_with_screw(inside_bin_pose)
 

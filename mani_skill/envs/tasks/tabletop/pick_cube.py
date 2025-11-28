@@ -5,7 +5,7 @@ import sapien
 import torch
 
 import mani_skill.envs.utils.randomization as randomization
-from mani_skill.agents.robots import SO100, Fetch, Panda, WidowXAI, XArm6Robotiq
+from mani_skill.agents.robots import SO100, Fetch, Panda, WidowXAI, XArm6Robotiq, XArm6RobotiqCustom
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.tasks.tabletop.pick_cube_cfgs import PICK_CUBE_CONFIGS
 from mani_skill.sensors.camera import CameraConfig
@@ -38,10 +38,11 @@ class PickCubeEnv(BaseEnv):
         "panda",
         "fetch",
         "xarm6_robotiq",
+        "xarm6_robotiq_custom",
         "so100",
         "widowxai",
     ]
-    agent: Union[Panda, Fetch, XArm6Robotiq, SO100, WidowXAI]
+    agent: Union[Panda, Fetch, XArm6Robotiq, XArm6RobotiqCustom, SO100, WidowXAI]
     goal_thresh = 0.025
     cube_spawn_half_size = 0.05
     cube_spawn_center = (0, 0)
@@ -216,7 +217,7 @@ class PickCubeWidowXAIEnv(PickCubeEnv):
 PickCubeWidowXAIEnv.__doc__ = PICK_CUBE_DOC_STRING.format(robot_id="WidowXAI")
 
 
-@register_env("PickCubeCustom-v1", max_episode_steps=100)
+@register_env("PickCubeCustom-v1", max_episode_steps=150)
 class PickCubeCustomEnv(PickCubeEnv):
     def _get_obs_extra(self, info):
         obs = dict(

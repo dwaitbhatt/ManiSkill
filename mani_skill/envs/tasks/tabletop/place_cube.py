@@ -18,7 +18,7 @@ from mani_skill.utils.structs import Pose
 from mani_skill.utils.structs.types import Array, GPUMemoryConfig, SimConfig
 
 
-@register_env("PlaceCube-v1", max_episode_steps=150)
+@register_env("PlaceCube-v1", max_episode_steps=250)
 class PlaceCubeEnv(BaseEnv):
     """
     Task Description
@@ -41,17 +41,21 @@ class PlaceCubeEnv(BaseEnv):
 
     # set some commonly used values
     cube_half_length = 0.02  # half side length of the cube
-    inner_side_half_len = 0.06  # side length of the bin's inner square
-    short_side_half_size = 0.008  # length of the shortest edge of the block
+    bin_inner_half_size = 0.06  # half side length of the bin's inner square (x/y dimensions)
+    bin_wall_half_thickness = 0.008  # half thickness of the bin walls/blocks (used in half-size arrays)
+    bin_wall_height = 0.048  # height of the bin walls (from top of bottom block to top of edge blocks)
+    # Legacy variables for backward compatibility
+    inner_side_half_len = bin_inner_half_size
+    short_side_half_size = bin_wall_half_thickness
     block_half_size = [
-        short_side_half_size,
-        2 * short_side_half_size + inner_side_half_len,
-        2 * short_side_half_size + inner_side_half_len,
+        bin_wall_half_thickness,
+        2 * bin_wall_half_thickness + bin_inner_half_size,
+        2 * bin_wall_half_thickness + bin_inner_half_size,
     ]  # The bottom block of the bin, which is larger: The list represents the half length of the block along the [x, y, z] axis respectively.
     edge_block_half_size = [
-        short_side_half_size,
-        2 * short_side_half_size + inner_side_half_len,
-        2 * short_side_half_size,
+        bin_wall_half_thickness,
+        2 * bin_wall_half_thickness + bin_inner_half_size,
+        bin_wall_height / 2,
     ]  # The edge block of the bin, which is smaller. The representations are similar to the above one
 
     def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
@@ -137,7 +141,7 @@ class PlaceCubeEnv(BaseEnv):
             color=np.array([12, 42, 160, 255]) / 255,
             name="cube",
             body_type="dynamic",
-            initial_pose=sapien.Pose(p=[0, 0, self.cube_half_length + 2*self.short_side_half_size]),
+            initial_pose=sapien.Pose(p=[0, 0, self.cube_half_length + 2*self.bin_wall_half_thickness]),
         )
 
         self.bin = self._build_bin()
@@ -150,33 +154,82 @@ class PlaceCubeEnv(BaseEnv):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
 
-            # init the ~4cm cube in ([-0.2, -0.15]) along the x-axis (so that it doesn't collide with the bin)
-            xyz = torch.zeros((b, 3))
-            xyz[..., 0] = (torch.rand((b, 1)) * 0.05 - 0.2)[
-                ..., 0
-            ]
-            # spanning ys from ([-0.2, 0.2])
-            xyz[..., 1] = (torch.rand((b, 1)) * 0.4 - 0.2)[
-                ..., 0
-            ]
-            xyz[..., 2] = self.cube_half_length  # on the table
-            q = [1, 0, 0, 0]
-            obj_pose = Pose.create_from_pq(p=xyz, q=q)
-            self.obj.set_pose(obj_pose)
-
-            # init the ~12cm bin in ([0, 0.1]) along the x-axis (so that it doesn't collide with the cube)
+            # Play area bounds: x in [-0.4, 0.2], y in [-0.5, 0.5]
+            play_area_x_min, play_area_x_max = -0.4, 0.2
+            play_area_y_min, play_area_y_max = -0.5, 0.5
+            
+            # Bin half-size in x and y (same for both)
+            bin_xy_half_size = self.block_half_size[1]  # 2 * bin_wall_half_thickness + bin_inner_half_size
+            
+            # Place bin randomly such that it lies entirely within play area
+            # Bin center constraints: [play_area_min + bin_half_size, play_area_max - bin_half_size]
+            bin_x_min = play_area_x_min + bin_xy_half_size
+            bin_x_max = play_area_x_max - bin_xy_half_size
+            bin_y_min = play_area_y_min + bin_xy_half_size
+            bin_y_max = play_area_y_max - bin_xy_half_size
+            
             pos = torch.zeros((b, 3))
-            pos[:, 0] = (
-                torch.rand((b, 1))[..., 0] * 0.1
-            )
-            # spanning ys from ([-0.1, 0.1])
-            pos[:, 1] = (
-                torch.rand((b, 1))[..., 0] * 0.2 - 0.1
-            )
+            pos[:, 0] = torch.rand((b, 1))[..., 0] * (bin_x_max - bin_x_min) + bin_x_min
+            pos[:, 1] = torch.rand((b, 1))[..., 0] * (bin_y_max - bin_y_min) + bin_y_min
             pos[:, 2] = self.block_half_size[0]  # on the table
             q = [1, 0, 0, 0]
             bin_pose = Pose.create_from_pq(p=pos, q=q)
             self.bin.set_pose(bin_pose)
+            
+            # Place cube such that it's at least 15cm (0.15m) away from any bin wall
+            # The exclusion zone around the bin extends by: 0.15 (min distance) + cube_half_length
+            # This ensures the cube's edge is at least 0.15m from the bin's edge
+            exclusion_margin = 0.15 + self.cube_half_length
+            bin_exclusion_x_min = pos[:, 0:1] - bin_xy_half_size - exclusion_margin
+            bin_exclusion_x_max = pos[:, 0:1] + bin_xy_half_size + exclusion_margin
+            bin_exclusion_y_min = pos[:, 1:2] - bin_xy_half_size - exclusion_margin
+            bin_exclusion_y_max = pos[:, 1:2] + bin_xy_half_size + exclusion_margin
+            
+            # Sample cube positions that are outside the exclusion zone and within play area
+            # We'll use rejection sampling: sample from play area and reject if in exclusion zone
+            max_attempts = 1000
+            xyz = torch.zeros((b, 3))
+            for i in range(b):
+                found_valid = False
+                for attempt in range(max_attempts):
+                    # Sample candidate position uniformly from play area
+                    cand_x = torch.rand(1) * (play_area_x_max - play_area_x_min) + play_area_x_min
+                    cand_y = torch.rand(1) * (play_area_y_max - play_area_y_min) + play_area_y_min
+                    
+                    # Check if outside exclusion zone (cube center must be outside the expanded bin bounds)
+                    # A point is outside the exclusion rectangle if it's to the left, right, above, or below it
+                    outside_exclusion = (
+                        (cand_x < bin_exclusion_x_min[i, 0]) | (cand_x > bin_exclusion_x_max[i, 0]) |
+                        (cand_y < bin_exclusion_y_min[i, 0]) | (cand_y > bin_exclusion_y_max[i, 0])
+                    )
+                    
+                    if outside_exclusion:
+                        xyz[i, 0] = cand_x
+                        xyz[i, 1] = cand_y
+                        found_valid = True
+                        break
+                
+                # Fallback: if rejection sampling failed, place at play area corner furthest from bin center
+                if not found_valid:
+                    # Choose corner that maximizes distance from bin
+                    bin_x = pos[i, 0].item()
+                    bin_y = pos[i, 1].item()
+                    # Find corner with maximum distance from bin center
+                    if abs(play_area_x_min - bin_x) > abs(play_area_x_max - bin_x):
+                        best_corner_x = play_area_x_min
+                    else:
+                        best_corner_x = play_area_x_max
+                    if abs(play_area_y_min - bin_y) > abs(play_area_y_max - bin_y):
+                        best_corner_y = play_area_y_min
+                    else:
+                        best_corner_y = play_area_y_max
+                    xyz[i, 0] = best_corner_x
+                    xyz[i, 1] = best_corner_y
+            
+            xyz[:, 2] = self.cube_half_length  # on the table
+            q = [1, 0, 0, 0]
+            obj_pose = Pose.create_from_pq(p=xyz, q=q)
+            self.obj.set_pose(obj_pose)
 
     def evaluate(self):
         pos_obj = self.obj.pose.p
@@ -184,10 +237,10 @@ class PlaceCubeEnv(BaseEnv):
         offset = pos_obj - pos_bin
         xy_flag = torch.linalg.norm(offset[..., :2], axis=1) <= 0.05
         entering_bin_z_flag = (
-            offset[..., 2] - self.cube_half_length - self.short_side_half_size < 4 * self.short_side_half_size 
+            offset[..., 2] - self.cube_half_length - self.bin_wall_half_thickness < self.bin_wall_height 
         )
         placed_in_bin_z_flag = (
-            torch.abs(offset[..., 2] - self.cube_half_length - self.short_side_half_size) <= 0.005
+            torch.abs(offset[..., 2] - self.cube_half_length - self.bin_wall_half_thickness) <= 0.005
         )
         is_obj_entering_bin = torch.logical_and(xy_flag, entering_bin_z_flag)
         is_obj_placed_in_bin = torch.logical_and(xy_flag, placed_in_bin_z_flag)
@@ -229,15 +282,15 @@ class PlaceCubeEnv(BaseEnv):
         # grasp and reach bin top reward
         obj_pos = self.obj.pose.p
         bin_top_pos = self.bin.pose.p.clone()
-        # Height of the bin wall is 4 * short_side_half_size
-        bin_top_pos[:, 2] = bin_top_pos[:, 2] + self.short_side_half_size + self.cube_half_length + 4 * self.short_side_half_size
+
+        bin_top_pos[:, 2] = bin_top_pos[:, 2] + self.bin_wall_half_thickness + self.cube_half_length + self.bin_wall_height
         obj_to_bin_top_dist = torch.linalg.norm(bin_top_pos - obj_pos, axis=1)
         reach_bin_top_reward = 1 - torch.tanh(5.0 * obj_to_bin_top_dist)
         reward[info["is_obj_grasped"]] = (4 + reach_bin_top_reward)[info["is_obj_grasped"]]
 
         # reach inside bin reward
         bin_inside_pos = self.bin.pose.p.clone()
-        bin_inside_pos[:, 2] = bin_inside_pos[:, 2] + self.short_side_half_size + self.cube_half_length + 0.01
+        bin_inside_pos[:, 2] = bin_inside_pos[:, 2] + self.bin_wall_half_thickness + self.cube_half_length + 0.01
         obj_to_bin_inside_dist = torch.linalg.norm(bin_inside_pos - obj_pos, axis=1)
         reach_bin_inside_reward = 1 - torch.tanh(5.0 * obj_to_bin_inside_dist)
         reward[info["is_obj_entering_bin"]] = (6 + reach_bin_inside_reward)[info["is_obj_entering_bin"]]
