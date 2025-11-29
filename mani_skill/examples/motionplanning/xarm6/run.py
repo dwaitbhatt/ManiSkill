@@ -16,6 +16,7 @@ MP_SOLUTIONS = {
     "PickCubeCustom-v1": solvePickCube,
     "PushCube-v1": solvePushCube,
     "StackCube-v1": solveStackCube,
+    "StackCubeCustom-v1": solveStackCube,
     "PlugCharger-v1": solvePlugCharger,
     "PlaceCube-v1": solvePlaceCube,
 }

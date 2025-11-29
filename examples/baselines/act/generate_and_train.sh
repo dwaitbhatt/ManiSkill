@@ -1,7 +1,7 @@
 CONTROL_MODE="pd_joint_vel"
 
 for XARM_UID in xarm6_robotiq xarm6_robotiq_custom ; do
-    for env_id in PickCube-v1 PickCubeCustom-v1 PlaceCube-v1 ; do
+    for env_id in PickCubeCustom-v1 PlaceCube-v1 StackCubeCustom-v1 ; do
         mkdir -p demos/$env_id/motionplanning/$XARM_UID
 
         # Generate sample motion planning demo video

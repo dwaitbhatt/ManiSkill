@@ -10,7 +10,7 @@ def solve(env: PushCubeEnv, seed=None, debug=False, vis=False):
     if env.unwrapped.robot_uids == "xarm6_robotiq":
         planner_cls = XArm6RobotiqMotionPlanningSolver
     else:
-        raise ValueError(f"Unsupported robot uid: {env.robot_uid}")
+        raise ValueError(f"Unsupported robot uid: {env.robot_uids}")
     planner = planner_cls(
         env,
         debug=debug,

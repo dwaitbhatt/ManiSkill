@@ -17,10 +17,10 @@ def solve(env: StackCubeEnv, seed=None, debug=False, vis=False):
         "pd_joint_pos",
         "pd_joint_pos_vel",
     ], env.unwrapped.control_mode
-    if env.unwrapped.robot_uids == "xarm6_robotiq":
+    if "xarm6_robotiq" in env.unwrapped.robot_uids:
         planner_cls = XArm6RobotiqMotionPlanningSolver
     else:
-        raise ValueError(f"Unsupported robot uid: {env.robot_uid}")
+        raise ValueError(f"Unsupported robot uid: {env.robot_uids}")
     planner = planner_cls(
         env,
         debug=debug,
