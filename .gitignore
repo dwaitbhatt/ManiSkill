@@ -50,3 +50,4 @@ htmlcov/
 *tdmpc2 copy/
 saved_observations/
 *.stl
+*venv*/

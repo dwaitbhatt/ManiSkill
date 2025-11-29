@@ -9,6 +9,7 @@ import torch.random
 
 from mani_skill.agents.robots import Panda, XArm6Robotiq, XArm6RobotiqCustom
 from mani_skill.envs.sapien_env import BaseEnv
+from mani_skill.envs.utils import randomization
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import sapien_utils
 from mani_skill.utils.building import actors
@@ -158,7 +159,6 @@ class PlaceCubeEnv(BaseEnv):
             play_area_x_min, play_area_x_max = -0.4, 0.2
             play_area_y_min, play_area_y_max = -0.5, 0.5
             
-            # Bin half-size in x and y (same for both)
             bin_xy_half_size = self.block_half_size[1]  # 2 * bin_wall_half_thickness + bin_inner_half_size
             
             # Place bin randomly such that it lies entirely within play area
@@ -168,64 +168,30 @@ class PlaceCubeEnv(BaseEnv):
             bin_y_min = play_area_y_min + bin_xy_half_size
             bin_y_max = play_area_y_max - bin_xy_half_size
             
+            # 15cm margin around the bin where the cube cannot be placed
+            exclusion_margin = 0.15 + self.cube_half_length
+            bin_radius = bin_xy_half_size + exclusion_margin
+            
+            sampler = randomization.UniformPlacementSampler(
+                bounds=([bin_x_min, bin_y_min], [bin_x_max, bin_y_max]),
+                batch_size=b,
+                device=self.device
+            )
+                        
+            bin_xy = sampler.sample(radius=bin_radius, max_trials=100, append=True, verbose=False)
             pos = torch.zeros((b, 3))
-            pos[:, 0] = torch.rand((b, 1))[..., 0] * (bin_x_max - bin_x_min) + bin_x_min
-            pos[:, 1] = torch.rand((b, 1))[..., 0] * (bin_y_max - bin_y_min) + bin_y_min
+            pos[:, 0] = bin_xy[:, 0]
+            pos[:, 1] = bin_xy[:, 1]
             pos[:, 2] = self.block_half_size[0]  # on the table
             q = [1, 0, 0, 0]
             bin_pose = Pose.create_from_pq(p=pos, q=q)
             self.bin.set_pose(bin_pose)
             
-            # Place cube such that it's at least 15cm (0.15m) away from any bin wall
-            # The exclusion zone around the bin extends by: 0.15 (min distance) + cube_half_length
-            # This ensures the cube's edge is at least 0.15m from the bin's edge
-            exclusion_margin = 0.15 + self.cube_half_length
-            bin_exclusion_x_min = pos[:, 0:1] - bin_xy_half_size - exclusion_margin
-            bin_exclusion_x_max = pos[:, 0:1] + bin_xy_half_size + exclusion_margin
-            bin_exclusion_y_min = pos[:, 1:2] - bin_xy_half_size - exclusion_margin
-            bin_exclusion_y_max = pos[:, 1:2] + bin_xy_half_size + exclusion_margin
-            
-            # Sample cube positions that are outside the exclusion zone and within play area
-            # We'll use rejection sampling: sample from play area and reject if in exclusion zone
-            max_attempts = 1000
+            # Sample cube positions avoiding the bin
+            cube_xy = sampler.sample(radius=self.cube_half_length, max_trials=100, append=False, verbose=False)
             xyz = torch.zeros((b, 3))
-            for i in range(b):
-                found_valid = False
-                for attempt in range(max_attempts):
-                    # Sample candidate position uniformly from play area
-                    cand_x = torch.rand(1) * (play_area_x_max - play_area_x_min) + play_area_x_min
-                    cand_y = torch.rand(1) * (play_area_y_max - play_area_y_min) + play_area_y_min
-                    
-                    # Check if outside exclusion zone (cube center must be outside the expanded bin bounds)
-                    # A point is outside the exclusion rectangle if it's to the left, right, above, or below it
-                    outside_exclusion = (
-                        (cand_x < bin_exclusion_x_min[i, 0]) | (cand_x > bin_exclusion_x_max[i, 0]) |
-                        (cand_y < bin_exclusion_y_min[i, 0]) | (cand_y > bin_exclusion_y_max[i, 0])
-                    )
-                    
-                    if outside_exclusion:
-                        xyz[i, 0] = cand_x
-                        xyz[i, 1] = cand_y
-                        found_valid = True
-                        break
-                
-                # Fallback: if rejection sampling failed, place at play area corner furthest from bin center
-                if not found_valid:
-                    # Choose corner that maximizes distance from bin
-                    bin_x = pos[i, 0].item()
-                    bin_y = pos[i, 1].item()
-                    # Find corner with maximum distance from bin center
-                    if abs(play_area_x_min - bin_x) > abs(play_area_x_max - bin_x):
-                        best_corner_x = play_area_x_min
-                    else:
-                        best_corner_x = play_area_x_max
-                    if abs(play_area_y_min - bin_y) > abs(play_area_y_max - bin_y):
-                        best_corner_y = play_area_y_min
-                    else:
-                        best_corner_y = play_area_y_max
-                    xyz[i, 0] = best_corner_x
-                    xyz[i, 1] = best_corner_y
-            
+            xyz[:, 0] = cube_xy[:, 0]
+            xyz[:, 1] = cube_xy[:, 1]
             xyz[:, 2] = self.cube_half_length  # on the table
             q = [1, 0, 0, 0]
             obj_pose = Pose.create_from_pq(p=xyz, q=q)
