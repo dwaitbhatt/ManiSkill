@@ -82,8 +82,8 @@ class StackCubeEnv(BaseEnv):
 
             xyz = torch.zeros((b, 3))
             xyz[:, 2] = 0.02
-            xy = torch.rand((b, 2)) * 0.2 - 0.1
-            region = [[-0.1, -0.2], [0.1, 0.2]]
+            xy = torch.rand((b, 2)) * 0.3 - 0.15
+            region = [[-0.25, -0.3], [0.25, 0.3]]
             sampler = randomization.UniformPlacementSampler(
                 bounds=region, batch_size=b, device=self.device
             )
