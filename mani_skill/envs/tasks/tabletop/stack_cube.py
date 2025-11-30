@@ -15,7 +15,7 @@ from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
 
 
-@register_env("StackCube-v1", max_episode_steps=200)
+@register_env("StackCube-v1", max_episode_steps=150)
 class StackCubeEnv(BaseEnv):
     """
     **Task Description:**
@@ -82,13 +82,14 @@ class StackCubeEnv(BaseEnv):
 
             xyz = torch.zeros((b, 3))
             xyz[:, 2] = 0.02
-            region = [[-0.5, -0.5], [0.25, 0.5]]
+            xy = torch.rand((b, 2)) * 0.2 - 0.1
+            region = [[-0.1, -0.2], [0.1, 0.2]]
             sampler = randomization.UniformPlacementSampler(
                 bounds=region, batch_size=b, device=self.device
             )
             radius = torch.linalg.norm(torch.tensor([0.02, 0.02])) + 0.001
-            cubeA_xy = sampler.sample(radius, 100)
-            cubeB_xy = sampler.sample(radius, 100, verbose=False)
+            cubeA_xy = xy + sampler.sample(radius, 100)
+            cubeB_xy = xy + sampler.sample(radius, 100, verbose=False)
 
             xyz[:, :2] = cubeA_xy
             qs = randomization.random_quaternions(
@@ -185,7 +186,7 @@ class StackCubeEnv(BaseEnv):
         return self.compute_dense_reward(obs=obs, action=action, info=info) / 8
 
 
-@register_env("StackCubeCustom-v1", max_episode_steps=200)
+@register_env("StackCubeCustom-v1", max_episode_steps=150)
 class StackCubeCustomEnv(StackCubeEnv):
     def _get_obs_extra(self, info):
         # obs = dict(tcp_pose=self.agent.tcp.pose.raw_pose)
