@@ -7,8 +7,8 @@ from transforms3d.euler import euler2quat
 
 from mani_skill.envs.tasks import PlugChargerEnv
 from mani_skill.examples.motionplanning.xarm6.motionplanner import \
-    XArm6RobotiqMotionPlanningSolver, XArm6PandaGripperMotionPlanningSolver
-from mani_skill.examples.motionplanning.panda.utils import (
+    XArm6RobotiqMotionPlanningSolver
+from mani_skill.examples.motionplanning.base_motionplanner.utils import (
     compute_grasp_info_by_obb, get_actor_obb)
 
 
@@ -34,10 +34,8 @@ def solve(env: PlugChargerEnv, seed=None, debug=False, vis=False):
     ], env.unwrapped.control_mode
     if env.unwrapped.robot_uids == "xarm6_robotiq":
         planner_cls = XArm6RobotiqMotionPlanningSolver
-    elif env.unwrapped.robot_uids == "xarm6_pandagripper":
-        planner_cls = XArm6PandaGripperMotionPlanningSolver
     else:
-        raise ValueError(f"Unsupported robot uid: {env.robot_uid}")
+        raise ValueError(f"Unsupported robot uid: {env.robot_uids}")
     planner = planner_cls(
         env,
         debug=debug,
@@ -78,7 +76,7 @@ def solve(env: PlugChargerEnv, seed=None, debug=False, vis=False):
     # Reach
     # -------------------------------------------------------------------------- #
     reach_pose = grasp_pose * sapien.Pose([0, 0, -0.05])
-    planner.move_to_pose_with_screw(reach_pose)
+    planner.move_to_pose_with_RRTStar(reach_pose)
 
     # -------------------------------------------------------------------------- #
     # Grasp
@@ -95,7 +93,7 @@ def solve(env: PlugChargerEnv, seed=None, debug=False, vis=False):
         * env.charger.pose.sp.inv()
         * env.agent.tcp.pose.sp
     )
-    insert_pose = env.goal_pose.sp * env.charger.pose.sp.inv() * env.agent.tcp.pose.sp
+    insert_pose = env.goal_pose.sp * env.charger.pose.sp.inv() * env.agent.tcp.pose.sp * sapien.Pose([0, 0, -0.005])
     planner.move_to_pose_with_screw(pre_insert_pose, refine_steps=0)
     planner.move_to_pose_with_screw(pre_insert_pose, refine_steps=5)
     # -------------------------------------------------------------------------- #

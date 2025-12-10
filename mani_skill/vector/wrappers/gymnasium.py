@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Union
 
 import gymnasium as gym
 import torch
 from gymnasium.vector import VectorEnv
 
+from mani_skill.utils.common import torch_clone_dict
 from mani_skill.utils.structs.types import Array
 
 if TYPE_CHECKING:
+    from gymnasium import Env
+
     from mani_skill.envs.sapien_env import BaseEnv
 
 
 class ManiSkillVectorEnv(VectorEnv):
     """
     Gymnasium Vector Env implementation for ManiSkill environments running on the GPU for parallel simulation and optionally parallel rendering
-
-    Note that currently this also assumes modeling tasks as infinite horizon (e.g. terminations is always False, only reset when timelimit is reached)
 
     Args:
         env: The environment created via gym.make / after wrappers are applied. If a string is given, we use gym.make(env) to create an environment
@@ -34,8 +35,8 @@ class ManiSkillVectorEnv(VectorEnv):
 
     def __init__(
         self,
-        env: Union[BaseEnv, str],
-        num_envs: int = None,
+        env: Union[Env, str],
+        num_envs: int = 1,
         auto_reset: bool = True,
         ignore_terminations: bool = False,
         record_metrics: bool = False,
@@ -46,15 +47,31 @@ class ManiSkillVectorEnv(VectorEnv):
         else:
             self._env = env
             num_envs = self.base_env.num_envs
+        self.num_envs = num_envs
         self.auto_reset = auto_reset
         self.ignore_terminations = ignore_terminations
         self.record_metrics = record_metrics
         self.spec = self._env.spec
-        super().__init__(
-            num_envs,
-            self._env.get_wrapper_attr("single_observation_space"),
-            self._env.get_wrapper_attr("single_action_space"),
-        )
+
+        from mani_skill.utils.gym_utils import IS_GYMNASIUM_1
+
+        if IS_GYMNASIUM_1:
+            self.single_observation_space = self._env.get_wrapper_attr(
+                "single_observation_space"
+            )
+            self.single_action_space = self._env.get_wrapper_attr("single_action_space")
+            self.action_space = self._env.get_wrapper_attr("action_space")
+            self.observation_space = self._env.get_wrapper_attr("observation_space")
+            self.metadata = self._env.metadata
+            # hardcoded SAME STEP reset mode for now. Trying to support others with backwards compatability with gym < 1.0
+            # might be too much of a hassle.
+            self.metadata.update(autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+        else:
+            super().__init__(
+                num_envs,
+                self._env.get_wrapper_attr("single_observation_space"),
+                self._env.get_wrapper_attr("single_action_space"),
+            )
         if not self.ignore_terminations and auto_reset:
             assert (
                 self.base_env.reconfiguration_freq == 0 or self.base_env.num_envs == 1
@@ -77,7 +94,7 @@ class ManiSkillVectorEnv(VectorEnv):
 
     @property
     def base_env(self) -> BaseEnv:
-        return self._env.unwrapped
+        return self._env.unwrapped  # type: ignore
 
     @property
     def unwrapped(self):
@@ -86,13 +103,15 @@ class ManiSkillVectorEnv(VectorEnv):
     def reset(
         self,
         *,
-        seed: Optional[Union[int, List[int]]] = None,
-        options: Optional[dict] = dict(),
+        seed: Optional[Union[int, list[int]]] = None,
+        options: Optional[dict] = None,
     ):
-        obs, info = self._env.reset(seed=seed, options=options)
-        if "env_idx" in options:
+        obs, info = self._env.reset(seed=seed, options=options)  # type: ignore
+        if options is not None and "env_idx" in options:
             env_idx = options["env_idx"]
-            mask = torch.zeros(self.num_envs, dtype=bool, device=self.base_env.device)
+            mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.base_env.device
+            )
             mask[env_idx] = True
             if self.record_metrics:
                 self.success_once[mask] = False
@@ -105,11 +124,11 @@ class ManiSkillVectorEnv(VectorEnv):
                 self.returns[:] = 0
         return obs, info
 
-    def step(
-        self, actions: Union[Array, Dict]
-    ) -> Tuple[Array, Array, Array, Array, Dict]:
+    def step(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, actions: Union[Array, dict]
+    ) -> Tuple[Array, Array, Array, Array, dict]:
         obs, rew, terminations, truncations, infos = self._env.step(actions)
-
+        episode_info: Optional[dict] = None
         if self.record_metrics:
             episode_info = dict()
             self.returns += rew
@@ -130,7 +149,7 @@ class ManiSkillVectorEnv(VectorEnv):
 
         if self.ignore_terminations:
             terminations[:] = False
-            if self.record_metrics:
+            if episode_info:
                 if "success" in infos:
                     episode_info["success_at_end"] = infos["success"].clone()
                 if "fail" in infos:
@@ -138,25 +157,34 @@ class ManiSkillVectorEnv(VectorEnv):
         if self.record_metrics:
             infos["episode"] = episode_info
 
-        dones = torch.logical_or(terminations, truncations)
+        dones = torch.logical_or(
+            terminations, truncations  # pyright: ignore[reportArgumentType]
+        )
 
         if dones.any() and self.auto_reset:
-            final_obs = obs
+            final_obs = torch_clone_dict(obs)
             env_idx = torch.arange(0, self.num_envs, device=self.device)[dones]
-            obs, _ = self.reset(options=dict(env_idx=env_idx))
-            infos["final_info"] = infos.copy()
+            final_info = torch_clone_dict(infos)
+            obs, infos = self.reset(options=dict(env_idx=env_idx))
             # gymnasium calls it final observation but it really is just o_{t+1} or the true next observation
             infos["final_observation"] = final_obs
+            infos["final_info"] = final_info
             # NOTE (stao): that adding masks like below is a bit redundant and not necessary
             # but this is to follow the standard gymnasium API
             infos["_final_info"] = dones
             infos["_final_observation"] = dones
             infos["_elapsed_steps"] = dones
             # NOTE (stao): Unlike gymnasium, the code here does not add masks for every key in the info object.
-        return obs, rew, terminations, truncations, infos
+        return (
+            obs,
+            rew,
+            terminations,
+            truncations,
+            infos,
+        )  # pyright: ignore[reportReturnType]
 
-    def close(self):
-        return self._env.close()
+    def close_extras(self, **kwargs):
+        self._env.close()
 
     def call(self, name: str, *args, **kwargs):
         function = getattr(self._env, name)

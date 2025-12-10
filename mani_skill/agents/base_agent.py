@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 import sapien
-import sapien.physx as physx
 import torch
 from gymnasium import spaces
 
@@ -29,7 +28,9 @@ from .controllers.base_controller import (
 
 if TYPE_CHECKING:
     from mani_skill.envs.scene import ManiSkillScene
-DictControllerConfig = Dict[str, ControllerConfig]
+    from mani_skill.utils.building.mjcf_loader import MJCFLoader
+    from mani_skill.utils.building.urdf_loader import URDFLoader
+DictControllerConfig = dict[str, ControllerConfig]
 
 
 @dataclass
@@ -61,7 +62,7 @@ class BaseAgent:
     """unique identifier string of this"""
     urdf_path: Union[str, None] = None
     """path to the .urdf file describe the agent's geometry and visuals. One of urdf_path or mjcf_path must be provided."""
-    urdf_config: Union[str, Dict] = None
+    urdf_config: Union[str, dict, None] = None
     """Optional provide a urdf_config to further modify the created articulation"""
     mjcf_path: Union[str, None] = None
     """path to a MJCF .xml file defining a robot. This will only load the articulation defined in the XML and nothing else.
@@ -76,8 +77,11 @@ class BaseAgent:
     However for some robots/tasks it may be easier to disable all self collisions between links in the robot to increase simulation speed
     """
 
-    keyframes: Dict[str, Keyframe] = dict()
+    keyframes: dict[str, Keyframe] = dict()
     """a dict of predefined keyframes similar to what Mujoco does that you can use to reset the agent to that may be of interest"""
+
+    robot: Articulation
+    """The robot object, which is an Articulation. Data like pose, qpos etc. can be accessed from this object."""
 
     def __init__(
         self,
@@ -86,16 +90,16 @@ class BaseAgent:
         control_mode: Optional[str] = None,
         agent_idx: Optional[str] = None,
         initial_pose: Optional[Union[sapien.Pose, Pose]] = None,
+        build_separate: bool = False,
     ):
         self.scene = scene
         self._control_freq = control_freq
         self._agent_idx = agent_idx
+        self.build_separate = build_separate
 
-        self.robot: Articulation = None
-        """The robot object, which is an Articulation. Data like pose, qpos etc. can be accessed from this object."""
-        self.controllers: Dict[str, BaseController] = dict()
+        self.controllers: dict[str, BaseController] = dict()
         """The controllers of the robot."""
-        self.sensors: Dict[str, BaseSensor] = dict()
+        self.sensors: dict[str, BaseSensor] = dict()
         """The sensors that come with the robot."""
 
         self._load_articulation(initial_pose)
@@ -113,14 +117,14 @@ class BaseAgent:
         self._after_init()
 
     @property
-    def _sensor_configs(self) -> List[BaseSensorConfig]:
+    def _sensor_configs(self) -> list[BaseSensorConfig]:
         """Returns a list of sensor configs for this agent. By default this is empty."""
         return []
 
     @property
     def _controller_configs(
         self,
-    ) -> Dict[str, Union[ControllerConfig, DictControllerConfig]]:
+    ) -> dict[str, Union[ControllerConfig, DictControllerConfig]]:
         """Returns a dict of controller configs for this agent. By default this is a PDJointPos (delta and non delta) controller for all active joints."""
         return dict(
             pd_joint_pos=PDJointPosControllerConfig(
@@ -152,51 +156,77 @@ class BaseAgent:
         """
         Loads the robot articulation
         """
-        if self.urdf_path is not None:
-            loader = self.scene.create_urdf_loader()
-            asset_path = format_path(str(self.urdf_path))
-        elif self.mjcf_path is not None:
-            loader = self.scene.create_mjcf_loader()
-            asset_path = format_path(str(self.mjcf_path))
 
-        loader.name = self.uid
-        if self._agent_idx is not None:
-            loader.name = f"{self.uid}-agent-{self._agent_idx}"
-        loader.fix_root_link = self.fix_root_link
-        loader.load_multiple_collisions_from_file = self.load_multiple_collisions
-        loader.disable_self_collisions = self.disable_self_collisions
+        def build_articulation(scene_idxs: Optional[list[int]] = None):
+            loader: Union[URDFLoader, MJCFLoader, None] = None
+            if self.urdf_path is not None:
+                loader = self.scene.create_urdf_loader()
+                asset_path = format_path(str(self.urdf_path))
+            elif self.mjcf_path is not None:
+                loader = self.scene.create_mjcf_loader()
+                asset_path = format_path(str(self.mjcf_path))
+            assert (
+                loader is not None
+            ), "No loader found. Provide either path in either urdf_path or mjcf_path"
+            loader.name = self.uid
+            if self._agent_idx is not None:
+                loader.name = f"{self.uid}-agent-{self._agent_idx}"
+            loader.fix_root_link = self.fix_root_link
+            loader.load_multiple_collisions_from_file = self.load_multiple_collisions
+            loader.disable_self_collisions = self.disable_self_collisions
 
-        if self.urdf_config is not None:
-            urdf_config = sapien_utils.parse_urdf_config(self.urdf_config)
-            sapien_utils.check_urdf_config(urdf_config)
-            sapien_utils.apply_urdf_config(loader, urdf_config)
+            if self.urdf_config is not None:
+                urdf_config = sapien_utils.parse_urdf_config(self.urdf_config)
+                sapien_utils.check_urdf_config(urdf_config)
+                sapien_utils.apply_urdf_config(loader, urdf_config)
 
-        if not os.path.exists(asset_path):
-            print(f"Robot {self.uid} definition file not found at {asset_path}")
-            if self.uid in assets.DATA_GROUPS or len(assets.DATA_GROUPS[self.uid]) > 0:
-                response = download_asset.prompt_yes_no(
-                    f"Robot {self.uid} has assets available for download. Would you like to download them now?"
-                )
-                if response:
-                    for (
-                        asset_id
-                    ) in assets.expand_data_group_into_individual_data_source_ids(
-                        self.uid
-                    ):
-                        download_asset.download(assets.DATA_SOURCES[asset_id])
+            if not os.path.exists(asset_path):
+                print(f"Robot {self.uid} definition file not found at {asset_path}")
+                if (
+                    self.uid in assets.DATA_GROUPS
+                    or len(assets.DATA_GROUPS[self.uid]) > 0
+                ):
+                    response = download_asset.prompt_yes_no(
+                        f"Robot {self.uid} has assets available for download. Would you like to download them now?"
+                    )
+                    if response:
+                        for (
+                            asset_id
+                        ) in assets.expand_data_group_into_individual_data_source_ids(
+                            self.uid
+                        ):
+                            download_asset.download(assets.DATA_SOURCES[asset_id])
+                    else:
+                        print(
+                            f"Exiting as assets for robot {self.uid} are not downloaded"
+                        )
+                        exit()
                 else:
-                    print(f"Exiting as assets for robot {self.uid} are not downloaded")
+                    print(
+                        f"Exiting as assets for robot {self.uid} are not found. Check that this agent is properly registered with the appropriate download asset ids"
+                    )
                     exit()
-            else:
-                print(
-                    f"Exiting as assets for robot {self.uid} are not found. Check that this agent is properly registered with the appropriate download asset ids"
-                )
-                exit()
-        builder = loader.parse(asset_path)["articulation_builders"][0]
-        builder.initial_pose = initial_pose
-        self.robot = builder.build()
-        assert self.robot is not None, f"Fail to load URDF/MJCF from {asset_path}"
+            builder = loader.parse(asset_path)["articulation_builders"][0]
+            builder.initial_pose = initial_pose
+            if scene_idxs is not None:
+                builder.set_scene_idxs(scene_idxs)
+                builder.set_name(f"{self.uid}-agent-{self._agent_idx}-{scene_idxs}")
+            robot = builder.build()
+            assert robot is not None, f"Fail to load URDF/MJCF from {asset_path}"
+            return robot
 
+        if self.build_separate:
+            arts = []
+            for scene_idx in range(self.scene.num_envs):
+                robot = build_articulation([scene_idx])
+                self.scene.remove_from_state_dict_registry(robot)
+                arts.append(robot)
+            self.robot = Articulation.merge(
+                arts, name=f"{self.uid}-agent-{self._agent_idx}", merge_links=True
+            )
+            self.scene.add_to_state_dict_registry(self.robot)
+        else:
+            self.robot = build_articulation()
         # Cache robot link names
         self.robot_link_names = [link.name for link in self.robot.get_links()]
 
@@ -316,24 +346,36 @@ class BaseAgent:
             obs.update(controller=controller_state)
         return obs
 
-    def get_state(self) -> Dict:
+    def get_controller_state(self):
+        """
+        Get the state of the controller.
+        """
+        return self.controller.get_state()
+
+    def set_controller_state(self, state: Array):
+        """
+        Set the state of the controller.
+        """
+        self.controller.set_state(state)
+
+    def get_state(self) -> dict:
         """Get current state, including robot state and controller state"""
         state = dict()
 
         # robot state
         root_link = self.robot.get_links()[0]
-        state["robot_root_pose"] = root_link.get_pose()
+        state["robot_root_pose"] = root_link.pose
         state["robot_root_vel"] = root_link.get_linear_velocity()
         state["robot_root_qvel"] = root_link.get_angular_velocity()
         state["robot_qpos"] = self.robot.get_qpos()
         state["robot_qvel"] = self.robot.get_qvel()
 
         # controller state
-        state["controller"] = self.controller.get_state()
+        state["controller"] = self.get_controller_state()
 
         return state
 
-    def set_state(self, state: Dict, ignore_controller=False):
+    def set_state(self, state: dict, ignore_controller=False):
         """Set the state of the agent, including the robot state and controller state.
         If ignore_controller is True, the controller state will not be updated."""
         # robot state
@@ -344,7 +386,7 @@ class BaseAgent:
         self.robot.set_qvel(state["robot_qvel"])
 
         if not ignore_controller and "controller" in state:
-            self.controller.set_state(state["controller"])
+            self.set_controller_state(state["controller"])
         if self.device.type == "cuda":
             self.scene._gpu_apply_all()
             self.scene.px.gpu_update_articulation_kinematics()

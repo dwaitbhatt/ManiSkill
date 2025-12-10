@@ -2,7 +2,6 @@
 Functions that map a observation to a particular format, e.g. mapping the raw images to rgbd or pointcloud formats
 """
 
-from typing import Dict
 
 import numpy as np
 import sapien.physx as physx
@@ -14,7 +13,7 @@ from mani_skill.sensors.camera import Camera
 from mani_skill.utils import common
 
 
-def sensor_data_to_pointcloud(observation: Dict, sensors: Dict[str, BaseSensor]):
+def sensor_data_to_pointcloud(observation: dict, sensors: dict[str, BaseSensor]):
     """convert all camera data in sensor to pointcloud data"""
     sensor_data = observation["sensor_data"]
     camera_params = observation["sensor_param"]
@@ -29,7 +28,7 @@ def sensor_data_to_pointcloud(observation: Dict, sensors: Dict[str, BaseSensor])
             # TODO: double check if the .clone()s are necessary
             # Each pixel is (x, y, z, actor_id) in OpenGL camera space
             # actor_id = 0 for the background
-            images: Dict[str, torch.Tensor]
+            images: dict[str, torch.Tensor]
             position = images["position"].clone()
             segmentation = images["segmentation"].clone()
             position = position.float()
@@ -38,7 +37,7 @@ def sensor_data_to_pointcloud(observation: Dict, sensors: Dict[str, BaseSensor])
             )  # convert the raw depth from millimeters to meters
 
             # Convert to world space
-            cam2world = camera_params[cam_uid]["cam2world_gl"]
+            cam2world = camera_params[cam_uid]["cam2world_gl"].to(position.device)
             xyzw = torch.cat([position, segmentation != 0], dim=-1).reshape(
                 position.shape[0], -1, 4
             ) @ cam2world.transpose(1, 2)

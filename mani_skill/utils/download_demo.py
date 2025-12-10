@@ -26,6 +26,7 @@ DATASET_SOURCES: dict[str, DemoDatasetSource] = {}
 # Rigid body envs
 for env_id in [
     "AnymalC-Reach-v1",
+    "DrawTriangle-v1",
     "LiftPegUpright-v1",
     "PegInsertionSide-v1",
     "PickCube-v1",
@@ -37,14 +38,13 @@ for env_id in [
     "PushT-v1",
     "RollBall-v1",
     "StackCube-v1",
+    "StackPyramid-v1",
     "TwoRobotPickCube-v1",
     "TwoRobotStackCube-v1",
 ]:
     DATASET_SOURCES[env_id] = DemoDatasetSource(
         raw_dataset_url=f"https://huggingface.co/datasets/haosulab/ManiSkill_Demonstrations/resolve/main/demos/{env_id}.zip?download=true"
     )
-
-pbar = None
 
 
 def tqdmhook(t):

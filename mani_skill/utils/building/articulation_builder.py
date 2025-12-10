@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Optional, Sequence, Union
 
 import numpy as np
 import sapien
@@ -18,9 +18,6 @@ from mani_skill.utils.structs.pose import to_sapien_pose
 
 if TYPE_CHECKING:
     from mani_skill.envs.scene import ManiSkillScene
-
-SPAWN_SPACING = 5
-SPAWN_START_GAP = 10
 
 
 class ArticulationBuilder(SapienArticulationBuilder):
@@ -40,7 +37,7 @@ class ArticulationBuilder(SapienArticulationBuilder):
     def set_scene_idxs(
         self,
         scene_idxs: Optional[
-            Union[List[int], Sequence[int], torch.Tensor, np.ndarray]
+            Union[list[int], Sequence[int], torch.Tensor, np.ndarray]
         ] = None,
     ):
         """
@@ -81,8 +78,9 @@ class ArticulationBuilder(SapienArticulationBuilder):
             )
 
             entity.add_component(link_component)
-            if b.visual_records:
-                entity.add_component(b.build_render_component())
+            if self.scene.can_render():
+                if b.visual_records:
+                    entity.add_component(b.build_render_component())
             entity.name = b.name
 
             link_component.name = f"{name_prefix}{b.name}"
@@ -151,7 +149,7 @@ class ArticulationBuilder(SapienArticulationBuilder):
                 articulation_pose = to_sapien_pose(initial_pose_np)
             else:
                 articulation_pose = to_sapien_pose(initial_pose_np[i])
-            links: List[sapien.Entity] = self._build_entities(
+            links: list[sapien.Entity] = self._build_entities(
                 name_prefix=f"scene-{scene_idx}-{self.name}_",
                 initial_pose=articulation_pose,
             )

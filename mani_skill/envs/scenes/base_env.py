@@ -1,4 +1,4 @@
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import numpy as np
 import sapien as sapien
@@ -110,7 +110,10 @@ class SceneManipulationEnv(BaseEnv):
         return super()._load_lighting(options)
 
     def _load_agent(self, options: dict):
-        super()._load_agent(options, sapien.Pose())
+        super()._load_agent(
+            options,
+            self.scene_builder.robot_initial_pose,
+        )
 
     def _load_scene(self, options: dict):
         if self.scene_builder.build_configs is not None:
@@ -139,11 +142,11 @@ class SceneManipulationEnv(BaseEnv):
     def evaluate(self) -> dict:
         return dict()
 
-    def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
+    def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
         return 0
 
     def compute_normalized_dense_reward(
-        self, obs: Any, action: torch.Tensor, info: Dict
+        self, obs: Any, action: torch.Tensor, info: dict
     ):
         return self.compute_dense_reward(obs=obs, action=action, info=info) / 1
 

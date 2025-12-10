@@ -1,6 +1,5 @@
 import os.path as osp
 from pathlib import Path
-from typing import List
 
 import numpy as np
 import sapien
@@ -14,8 +13,10 @@ from mani_skill.utils.building.ground import build_ground
 from mani_skill.utils.scene_builder import SceneBuilder
 
 
-# TODO (stao): make the build and initialize api consistent with other scenes
 class TableSceneBuilder(SceneBuilder):
+    """A simple scene builder that adds a table to the scene such that the height of the table is at 0, and
+    gives reasonable initial poses for robots."""
+
     def build(self):
         builder = self.scene.create_actor_builder()
         model_dir = Path(osp.dirname(__file__)) / "assets"
@@ -39,10 +40,17 @@ class TableSceneBuilder(SceneBuilder):
             p=[-0.12, 0, -0.9196429], q=euler2quat(0, 0, np.pi / 2)
         )
         table = builder.build_kinematic(name="table-workspace")
-        aabb = (
-            table._objs[0]
-            .find_component_by_type(sapien.render.RenderBodyComponent)
-            .compute_global_aabb_tight()
+        # aabb = (
+        #     table._objs[0]
+        #     .find_component_by_type(sapien.render.RenderBodyComponent)
+        #     .compute_global_aabb_tight()
+        # )
+        # value of the call above is saved below
+        aabb = np.array(
+            [
+                [-0.7402168, -1.2148621, -0.91964257],
+                [0.4688596, 1.2030163, 3.5762787e-07],
+            ]
         )
         self.table_length = aabb[1, 0] - aabb[0, 0]
         self.table_width = aabb[1, 1] - aabb[0, 1]
@@ -54,7 +62,7 @@ class TableSceneBuilder(SceneBuilder):
             self.scene, floor_width=floor_width, altitude=-self.table_height
         )
         self.table = table
-        self.scene_objects: List[sapien.Entity] = [self.table, self.ground]
+        self.scene_objects: list[sapien.Entity] = [self.table, self.ground]
 
     def initialize(self, env_idx: torch.Tensor):
         # table_height = 0.9196429
@@ -116,27 +124,6 @@ class TableSceneBuilder(SceneBuilder):
             qpos[:, -2:] = 0.04
             self.env.agent.reset(qpos)
             self.env.agent.robot.set_pose(sapien.Pose([-0.615, 0, 0]))
-        elif self.env.robot_uids == "xmate3_robotiq":
-            qpos = np.array(
-                [0, np.pi / 6, 0, np.pi / 3, 0, np.pi / 2, -np.pi / 2, 0, 0]
-            )
-            if self.env._enhanced_determinism:
-                qpos = (
-                    self.env._batched_episode_rng[env_idx].normal(
-                        0, self.robot_init_qpos_noise, len(qpos)
-                    )
-                    + qpos
-                )
-            else:
-                qpos = (
-                    self.env._episode_rng.normal(
-                        0, self.robot_init_qpos_noise, (b, len(qpos))
-                    )
-                    + qpos
-                )
-            qpos[:, -2:] = 0
-            self.env.agent.reset(qpos)
-            self.env.agent.robot.set_pose(sapien.Pose([-0.562, 0, 0]))
         elif self.env.robot_uids in [
             "xarm6_allegro_left",
             "xarm6_allegro_right",
@@ -153,16 +140,6 @@ class TableSceneBuilder(SceneBuilder):
             )
             self.env.agent.reset(qpos)
             self.env.agent.robot.set_pose(sapien.Pose([-0.522, 0, 0]))
-        elif self.env.robot_uids == "floating_robotiq_2f_85_gripper":
-            qpos = self.env.agent.keyframes["open_facing_side"].qpos
-            qpos = (
-                self.env._episode_rng.normal(
-                    0, self.robot_init_qpos_noise, (b, len(qpos))
-                )
-                + qpos
-            )
-            self.env.agent.reset(qpos)
-            self.env.agent.robot.set_pose(sapien.Pose([-0.5, 0, 0.05]))
         elif self.env.robot_uids == "fetch":
             qpos = np.array(
                 [
@@ -300,3 +277,18 @@ class TableSceneBuilder(SceneBuilder):
                 )
             self.env.agent.reset(qpos)
             self.env.agent.robot.set_pose(sapien.Pose([-0.615, 0, 0]))
+        elif self.env.robot_uids in ["widowxai", "widowxai_wristcam"]:
+            qpos = self.env.agent.keyframes["ready_to_grasp"].qpos
+            self.env.agent.reset(qpos)
+        elif self.env.robot_uids == "so100":
+            qpos = np.array([0, 0, 0, np.pi / 2, np.pi / 2, 0])
+            qpos = (
+                self.env._episode_rng.normal(
+                    0, self.robot_init_qpos_noise, (b, len(qpos))
+                )
+                + qpos
+            )
+            self.env.agent.reset(qpos)
+            self.env.agent.robot.set_pose(
+                sapien.Pose([-0.725, 0, 0], q=euler2quat(0, 0, np.pi / 2))
+            )

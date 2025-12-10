@@ -3,7 +3,7 @@ Common utilities often reused for internal code and task building for users.
 """
 
 from collections import defaultdict
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 
 import gymnasium as gym
 import numpy as np
@@ -15,6 +15,25 @@ from mani_skill.utils.structs.types import Array, Device
 # -------------------------------------------------------------------------- #
 # Utilities for working with tensors, numpy arrays, and batched data
 # -------------------------------------------------------------------------- #
+
+
+def torch_clone_dict(data: dict) -> dict:
+    """
+    Recursively clones all torch tensors in a dictionary.
+    If the input was a torch tensor, it will return a clone of the tensor.
+    """
+    if isinstance(data, torch.Tensor):
+        return data.clone()
+
+    output_dict = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            output_dict[key] = torch_clone_dict(value)
+        elif isinstance(value, torch.Tensor):
+            output_dict[key] = value.clone()
+        else:
+            output_dict[key] = value
+    return output_dict
 
 
 def _batch(array: Union[Array, Sequence]):
@@ -65,7 +84,7 @@ def dict_merge(dct: dict, merge_dct: dict):
 
 
 # TODO (stao): Consolidate this function with the one above..
-def merge_dicts(ds: Sequence[Dict], asarray=False):
+def merge_dicts(ds: Sequence[dict], asarray=False):
     """Merge multiple dicts with the same keys to a single one."""
     # NOTE(jigu): To be compatible with generator, we only iterate once.
     ret = defaultdict(list)
@@ -160,7 +179,7 @@ def to_cpu_tensor(array: Array):
     Maps any given sequence to a torch tensor on the CPU.
     """
     if isinstance(array, (dict)):
-        return {k: to_tensor(v) for k, v in array.items()}
+        return {k: to_cpu_tensor(v) for k, v in array.items()}
     if isinstance(array, np.ndarray):
         ret = torch.from_numpy(array)
         if ret.dtype == torch.float64:

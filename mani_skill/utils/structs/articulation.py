@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Tuple, Union
 
 import numpy as np
 import sapien
@@ -12,7 +12,11 @@ import torch
 import trimesh
 
 from mani_skill.utils import common, sapien_utils
-from mani_skill.utils.geometry.trimesh_utils import get_component_meshes, merge_meshes
+from mani_skill.utils.geometry.trimesh_utils import (
+    get_component_meshes,
+    get_render_shape_meshes,
+    merge_meshes,
+)
 from mani_skill.utils.structs import ArticulationJoint, BaseStruct, Link, Pose
 from mani_skill.utils.structs.types import Array
 
@@ -26,19 +30,19 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
     Wrapper around physx.PhysxArticulation objects
     """
 
-    links: List[Link]
-    """List of Link objects"""
-    links_map: Dict[str, Link]
+    links: list[Link]
+    """list of Link objects"""
+    links_map: dict[str, Link]
     """Maps link name to the Link object"""
     root: Link
     """The root Link object"""
-    joints: List[ArticulationJoint]
-    """List of Joint objects"""
-    joints_map: Dict[str, ArticulationJoint]
+    joints: list[ArticulationJoint]
+    """list of Joint objects"""
+    joints_map: dict[str, ArticulationJoint]
     """Maps joint name to the Joint object"""
-    active_joints: List[ArticulationJoint]
-    """List of active Joint objects, referencing elements in self.joints"""
-    active_joints_map: Dict[str, ArticulationJoint]
+    active_joints: list[ArticulationJoint]
+    """list of active Joint objects, referencing elements in self.joints"""
+    active_joints_map: dict[str, ArticulationJoint]
     """Maps active joint name to the Joint object, referencing elements in self.joints"""
 
     name: str = None
@@ -56,10 +60,10 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
     longer make "sense"
     """
 
-    _cached_joint_target_indices: Dict[int, torch.Tensor] = field(default_factory=dict)
-    """Map from a set of joints of this articulation and the indexing torch tensor to use for setting drive targets"""
+    _cached_joint_target_indices: dict[int, torch.Tensor] = field(default_factory=dict)
+    """Map from a set of joints of this articulation and the indexing torch tensor to use for setting drive targets in GPU sims."""
 
-    _net_contact_force_queries: Dict[
+    _net_contact_force_queries: dict[
         Tuple, physx.PhysxGpuContactBodyImpulseQuery
     ] = field(default_factory=dict)
     """Maps a tuple of link names to pre-saved net contact force queries"""
@@ -76,10 +80,11 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
     @classmethod
     def create_from_physx_articulations(
         cls,
-        physx_articulations: List[physx.PhysxArticulation],
+        physx_articulations: list[physx.PhysxArticulation],
         scene: ManiSkillScene,
         scene_idxs: torch.Tensor,
         _merged: bool = False,
+        _process_links: bool = True,
     ) -> Articulation:
         """
         Create a managed articulation object given a list of physx articulations. Note that this function requires all given articulations
@@ -106,17 +111,17 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
         )
         # create link and joint structs
         num_links = max([len(x.links) for x in physx_articulations])
-        all_links_objs: List[List[physx.PhysxArticulationLinkComponent]] = [
+        all_links_objs: list[list[physx.PhysxArticulationLinkComponent]] = [
             [] for _ in range(num_links)
         ]
         num_joints = max([len(x.joints) for x in physx_articulations])
-        all_joint_objs: List[List[physx.PhysxArticulationJoint]] = [
+        all_joint_objs: list[list[physx.PhysxArticulationJoint]] = [
             [] for _ in range(num_joints)
         ]
 
-        links_map: Dict[str, Link] = dict()
+        links_map: dict[str, Link] = dict()
         for articulation in physx_articulations:
-            if not _merged:
+            if _process_links:
                 assert num_links == len(articulation.links) and num_joints == len(
                     articulation.joints
                 ), "Gave different physx articulations. Articulation object created via create_from_physx_articulations can only \
@@ -125,7 +130,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
                 all_links_objs[i].append(link)
             for i, joint in enumerate(articulation.joints):
                 all_joint_objs[i].append(joint)
-        wrapped_links: List[Link] = []
+        wrapped_links: list[Link] = []
 
         root = None
         for links in all_links_objs:
@@ -139,14 +144,13 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
             assert wrapped_link.is_root.any() == wrapped_link.is_root.all()
             if wrapped_link.is_root.any():
                 root = wrapped_link
-                if _merged:
+                if not _process_links:
+                    # if not processing links we break early so that we only processed the root link which is always shared between articulations
                     break
         assert root is not None, "root link was not found"
         self.root = root
 
-        # we can only really have links and links maps when this is not a merged articulation.
-        # For merged articulations only the root link can make sense (it holds the root pose)
-        if not _merged:
+        if _process_links:
             self.links = wrapped_links
             self.links_map = links_map
 
@@ -160,7 +164,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
             ]
 
             joints_map = dict()
-            wrapped_joints: List[ArticulationJoint] = []
+            wrapped_joints: list[ArticulationJoint] = []
             for joint_index, joints in enumerate(all_joint_objs):
                 try:
                     active_joint_index = all_active_joint_names.index(
@@ -217,7 +221,21 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
         return self
 
     @classmethod
-    def merge(cls, articulations: List["Articulation"], name: str = None):
+    def merge(
+        cls,
+        articulations: list["Articulation"],
+        name: str = None,
+        merge_links: bool = False,
+    ):
+        """
+        Merge a list of articulations into a single articulation for easy access of data across multiple possibly different articulations.
+
+        Args:
+            articulations: A list of articulations objects to merge.
+            name: The name of the merged articulation.
+            merge_links: Whether to merge the links of the articulations. This is by default False as often times you merge articulations
+                that have different number of links. Set this true if you want to try and merge articulations that have the same number of links.
+        """
         objs = []
         scene = articulations[0].scene
         merged_scene_idxs = []
@@ -230,7 +248,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
             ), "Each given articulation must have the same number of managed objects"
         merged_scene_idxs = torch.concat(merged_scene_idxs)
         merged_articulation = Articulation.create_from_physx_articulations(
-            objs, scene, merged_scene_idxs, _merged=True
+            objs, scene, merged_scene_idxs, _merged=True, _process_links=merge_links
         )
         merged_articulation.name = name
         scene.articulation_views[merged_articulation.name] = merged_articulation
@@ -242,6 +260,9 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
 
     @cached_property
     def _data_index(self):
+        """
+        Returns a tensor of the indices of the articulation in the GPU simulation for the physx_cuda backend.
+        """
         return torch.tensor(
             [px_articulation.gpu_index for px_articulation in self._objs],
             device=self.device,
@@ -250,6 +271,9 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
 
     @cached_property
     def fixed_root_link(self):
+        """
+        Returns a boolean tensor of whether the root link is fixed for each parallel articulation
+        """
         return torch.tensor(
             [x.links[0].entity.components[0].joint.type == "fixed" for x in self._objs],
             device=self.device,
@@ -302,19 +326,24 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
     #                 g0, g1, g2, g3 = s.get_collision_groups()
     #                 s.set_collision_groups([g0, g1, g2 | (1 << 29), g3])
 
-    def get_first_collision_mesh(self, to_world_frame: bool = True) -> trimesh.Trimesh:
+    def get_first_collision_mesh(
+        self, to_world_frame: bool = True
+    ) -> Union[trimesh.Trimesh, None]:
         """
         Returns the collision mesh of the first managed articulation object. Note results of this are not cached or optimized at the moment
-        so this function can be slow if called too often
+        so this function can be slow if called too often. Some articulations have no collision meshes, in which case this function returns None
 
         Args:
             to_world_frame (bool): Whether to transform the collision mesh pose to the world frame
         """
-        return self.get_collision_meshes(to_world_frame=to_world_frame, first_only=True)
+        mesh = self.get_collision_meshes(to_world_frame=to_world_frame, first_only=True)
+        if isinstance(mesh, trimesh.Trimesh):
+            return mesh
+        return None
 
     def get_collision_meshes(
         self, to_world_frame: bool = True, first_only: bool = False
-    ) -> List[trimesh.Trimesh]:
+    ) -> Union[list[trimesh.Trimesh], trimesh.Trimesh]:
         """
         Returns the collision mesh of each managed articulation object. Note results of this are not cached or optimized at the moment
         so this function can be slow if called too often
@@ -322,7 +351,8 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
         Args:
             to_world_frame (bool): Whether to transform the collision mesh pose to the world frame
             first_only (bool): Whether to return the collision mesh of just the first articulation managed by this object. If True,
-                this also returns a single Trimesh.Mesh object instead of a list
+                this also returns a single Trimesh.Mesh object instead of a list. This can be useful for efficiency reasons if you know
+                ahead of time all of the managed actors have the same collision mesh
         """
         assert (
             not self.merged
@@ -335,7 +365,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
         else:
             self._objs[0].pose = self._objs[0].pose
         # TODO (stao): Can we have a batched version of trimesh?
-        meshes: List[trimesh.Trimesh] = []
+        meshes: list[trimesh.Trimesh] = []
 
         for i, art in enumerate(self._objs):
             art_meshes = []
@@ -347,22 +377,68 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
                         link_mesh.apply_transform(pose.sp.to_transformation_matrix())
                     art_meshes.append(link_mesh)
             mesh = merge_meshes(art_meshes)
-            meshes.append(mesh)
+            if mesh is not None:
+                meshes.append(mesh)
             if first_only:
                 break
-        if to_world_frame:
-            mat = self.pose
-            for i, mesh in enumerate(meshes):
-                if mat is not None:
-                    if len(mat) > 1:
-                        mesh.apply_transform(mat[i].sp.to_transformation_matrix())
-                    else:
-                        mesh.apply_transform(mat.sp.to_transformation_matrix())
+        if len(meshes) == 0:
+            return []
         if first_only:
             return meshes[0]
         return meshes
 
-    def get_net_contact_impulses(self, link_names: Union[List[str], Tuple[str]]):
+    def get_first_visual_mesh(self, to_world_frame: bool = True) -> trimesh.Trimesh:
+        """
+        Returns the visual mesh of the first managed articulation object. Note results of this are not cached or optimized at the moment
+        so this function can be slow if called too often
+        """
+        return self.get_visual_meshes(to_world_frame=to_world_frame, first_only=True)
+
+    def get_visual_meshes(
+        self, to_world_frame: bool = True, first_only: bool = False
+    ) -> list[trimesh.Trimesh]:
+        """
+        Returns the visual mesh of each managed articulation object. Note results of this are not cached or optimized at the moment
+        so this function can be slow if called too often
+        """
+        assert (
+            not self.merged
+        ), "Currently you cannot fetch visual meshes of merged articulations as merged articulations only share a root link"
+        if self.scene.gpu_sim_enabled:
+            assert (
+                self.scene._gpu_sim_initialized
+            ), "During GPU simulation link pose data is not accessible until after \
+                initialization, and link poses are needed to get the correct visual mesh of an entire articulation"
+        else:
+            self._objs[0].pose = self._objs[0].pose
+        meshes: list[trimesh.Trimesh] = []
+        for i, art in enumerate(self._objs):
+            art_meshes = []
+            for link in art.links:
+                render_shapes = []
+                rb_comp = link.entity.find_component_by_type(
+                    sapien.render.RenderBodyComponent
+                )
+                if rb_comp is not None:
+                    for render_shape in rb_comp.render_shapes:
+                        render_shapes += get_render_shape_meshes(render_shape)
+                    link_mesh = merge_meshes(render_shapes)
+                    if link_mesh is not None:
+                        if to_world_frame:
+                            pose = self.links[link.index].pose[i]
+                            link_mesh.apply_transform(
+                                pose.sp.to_transformation_matrix()
+                            )
+                        art_meshes.append(link_mesh)
+            mesh = merge_meshes(art_meshes)
+            meshes.append(mesh)
+            if first_only:
+                break
+        if first_only:
+            return meshes[0]
+        return meshes
+
+    def get_net_contact_impulses(self, link_names: Union[list[str], Tuple[str]]):
         """Get net contact impulses for several links together. This should be faster compared to using
         link.get_net_contact_impulses on each link.
 
@@ -411,7 +487,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
                     net_impulse[i] = common.to_tensor(total_impulse)
             return net_impulse[None, :]
 
-    def get_net_contact_forces(self, link_names: Union[List[str], Tuple[str]]):
+    def get_net_contact_forces(self, link_names: Union[list[str], Tuple[str]]):
         """Get net contact forces for several links together. This should be faster compared to using
         link.get_net_contact_forces on each link.
 
@@ -419,6 +495,67 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
         Returns force vector of shape (N, len(link_names), 3) where N is the number of environments
         """
         return self.get_net_contact_impulses(link_names) / self.scene.timestep
+
+    def get_joint_target_indices(
+        self, joint_indices: Union[Array, list[int], list[ArticulationJoint]]
+    ):
+        """
+        Gets the meshgrid indexes for indexing px.cuda_articulation_target_* values given a 1D list of joint indexes or a 1D list of ArticulationJoint objects.
+
+        Internally the given input is made to a tuple for a cache key and is used to cache results for fast lookup in the future, particularly for large-scale GPU simulations.
+        """
+        if isinstance(joint_indices, list):
+            joint_indices = tuple(joint_indices)
+        if joint_indices not in self._cached_joint_target_indices:
+            vals = joint_indices
+            if isinstance(joint_indices[0], ArticulationJoint):
+                for joint in joint_indices:
+                    assert (
+                        joint.articulation == self
+                    ), "Can only fetch this articulation's joint_target_indices when provided joints from this articulation"
+                vals = [
+                    x.active_index[0] for x in joint_indices
+                ]  # active_index on joint is batched but it should be the same value across all managed joint objects
+            self._cached_joint_target_indices[joint_indices] = torch.meshgrid(
+                self._data_index,
+                common.to_tensor(vals, device=self.device),
+                indexing="ij",
+            )
+        return self._cached_joint_target_indices[joint_indices]
+
+    def get_drive_targets(self):
+        return self.drive_targets
+
+    def get_drive_velocities(self):
+        return self.drive_velocities
+
+    @property
+    def drive_targets(self):
+        """
+        The current drive targets of the active joints. Also known as the target joint positions. Returns a tensor
+        of shape (N, M) where N is the number of environments and M is the number of active joints.
+        """
+        if self.scene.gpu_sim_enabled:
+            return self.px.cuda_articulation_target_qpos.torch()[
+                self.get_joint_target_indices(self.active_joints)
+            ]
+        else:
+            return torch.cat([x.drive_target for x in self.active_joints], dim=-1)
+
+    @property
+    def drive_velocities(self):
+        """
+        The current drive velocity targets of the active joints. Also known as the target joint velocities. Returns a tensor
+        of shape (N, M) where N is the number of environments and M is the number of active joints.
+        """
+        if self.scene.gpu_sim_enabled:
+            return self.px.cuda_articulation_target_qvel.torch()[
+                self.get_joint_target_indices(self.active_joints)
+            ]
+        else:
+            return torch.cat(
+                [x.drive_velocity_target for x in self.active_joints], dim=-1
+            )
 
     # -------------------------------------------------------------------------- #
     # Functions from physx.PhysxArticulation
@@ -455,6 +592,31 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
     # def get_gpu_index(self) -> int: ...
     def get_joints(self):
         return self.joints
+
+    def get_link_incoming_joint_forces(self):
+        """
+        Returns the incoming joint forces, referred to as spatial forces, for each link, with shape (N, M, 6), where N is the number of environments and M is the number of links.
+
+        Spatial forces are complex to describe and we recommend you see the physx documentation for how they are computed: https://nvidia-omniverse.github.io/PhysX/physx/5.6.0/docs/Articulations.html#link-incoming-joint-force
+
+        The mth spatial force refers to the mth link, and to find a particular link you can find the Link object first then use it's index attribute.
+
+        link = articulation.links_map[link_name]
+        link_index = link.index
+        link_incoming_joint_force = articulation.get_link_incoming_joint_forces()[:, link_index]
+
+        """
+        if self.scene.gpu_sim_enabled:
+            self.px.gpu_fetch_articulation_link_incoming_joint_forces()
+            # TODO (stao): we should lazy call the GPU data fetching functions in the future if necessarily. Since most users don't use this at the moment
+            # we just fetch it live here instead of with all the other fetch functions
+            return self.px.cuda_articulation_link_incoming_joint_forces.torch()[
+                self._data_index, :
+            ]
+        else:
+            return torch.from_numpy(
+                self._objs[0].get_link_incoming_joint_forces()[None, :]
+            )
 
     def get_links(self):
         return self.links
@@ -662,7 +824,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
             arg1 = common.to_tensor(arg1, device=self.device)
             self.px.cuda_rigid_body_data.torch()[
                 self.root._body_data_index[self.scene._reset_mask[self._scene_idxs]],
-                7:10,
+                10:13,
             ] = arg1
         else:
             arg1 = common.to_numpy(arg1)
@@ -680,7 +842,7 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
             arg1 = common.to_tensor(arg1, device=self.device)
             self.px.cuda_rigid_body_data.torch()[
                 self.root._body_data_index[self.scene._reset_mask[self._scene_idxs]],
-                10:13,
+                7:10,
             ] = arg1
         else:
             arg1 = common.to_numpy(arg1)
@@ -708,28 +870,27 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
         else:
             return self._objs[0].create_pinocchio_model()
 
-    # def _get_joint_indices(self, joints: List[Joint]):
-    #     if
-
     def set_joint_drive_targets(
         self,
         targets: Array,
-        joints: List[ArticulationJoint] = None,
-        joint_indices: torch.Tensor = None,
+        joints: Optional[list[ArticulationJoint]] = None,
+        joint_indices: Optional[torch.Tensor] = None,
     ):
         """
-        Set drive targets on active joints. Joint indices are required to be given for GPU sim, and joint objects are required for the CPU sim
+        Set drive targets on active joints given joints. For GPU simulation only joint_indices argument is supported, which should be a 1D list of the active joint indices in the articulation.
 
-        TODO (stao): can we use joint indices for the CPU sim as well? Some global joint indices?
+        joints argument will always be used when possible and is the recommended approach. On CPU simulation the joints argument is required, joint_indices is not supported.
         """
         if self.scene.gpu_sim_enabled:
             targets = common.to_tensor(targets, device=self.device)
-            if joint_indices not in self._cached_joint_target_indices:
-                self._cached_joint_target_indices[joint_indices] = torch.meshgrid(
-                    self._data_index, joint_indices, indexing="ij"
-                )
-            gx, gy = self._cached_joint_target_indices[joint_indices]
-            self.px.cuda_articulation_target_qpos.torch()[gx, gy] = targets
+            if joints is not None:
+                gx, gy = self.get_joint_target_indices(joints)
+            else:
+                gx, gy = self.get_joint_target_indices(joint_indices)
+            self.px.cuda_articulation_target_qpos.torch()[
+                gx[self.scene._reset_mask[self._scene_idxs]],
+                gy[self.scene._reset_mask[self._scene_idxs]],
+            ] = targets
         else:
             for i, joint in enumerate(joints):
                 joint.set_drive_target(targets[0, i])
@@ -737,22 +898,24 @@ class Articulation(BaseStruct[physx.PhysxArticulation]):
     def set_joint_drive_velocity_targets(
         self,
         targets: Array,
-        joints: List[ArticulationJoint] = None,
-        joint_indices: torch.Tensor = None,
+        joints: Optional[list[ArticulationJoint]] = None,
+        joint_indices: Optional[torch.Tensor] = None,
     ):
         """
-        Set drive velocity targets on active joints. Joint indices are required to be given for GPU sim, and joint objects are required for the CPU sim
+        Set drive velocity targets on active joints given joints. For GPU simulation only joint_indices argument is supported, which should be a 1D list of the active joint indices in the articulation.
 
-        TODO (stao): can we use joint indices for the CPU sim as well? Some global joint indices?
+        joints argument will always be used when possible and is the recommended approach. On CPU simulation the joints argument is required, joint_indices is not supported.
         """
         if self.scene.gpu_sim_enabled:
             targets = common.to_tensor(targets, device=self.device)
-            if joint_indices not in self._cached_joint_target_indices:
-                self._cached_joint_target_indices[joint_indices] = torch.meshgrid(
-                    self._data_index, joint_indices, indexing="ij"
-                )
-            gx, gy = self._cached_joint_target_indices[joint_indices]
-            self.px.cuda_articulation_target_qvel.torch()[gx, gy] = targets
+            if joints is not None:
+                gx, gy = self.get_joint_target_indices(joints)
+            else:
+                gx, gy = self.get_joint_target_indices(joint_indices)
+            self.px.cuda_articulation_target_qvel.torch()[
+                gx[self.scene._reset_mask[self._scene_idxs]],
+                gy[self.scene._reset_mask[self._scene_idxs]],
+            ] = targets
         else:
             for i, joint in enumerate(joints):
                 joint.set_drive_velocity_target(targets[0, i])

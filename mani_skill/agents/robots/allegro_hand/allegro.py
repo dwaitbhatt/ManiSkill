@@ -1,5 +1,4 @@
 from copy import deepcopy
-from typing import List
 
 import numpy as np
 import sapien
@@ -37,29 +36,14 @@ class AllegroHandRight(BaseAgent):
         },
     )
     keyframes = dict(
+        palm_side=Keyframe(
+            qpos=np.zeros(16),
+            pose=sapien.Pose([0, 0, 0.5], q=[1, 0, 0, 0]),
+        ),
         palm_up=Keyframe(
-            qpos=np.array(
-                [
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                ]
-            ),
+            qpos=np.zeros(16),
             pose=sapien.Pose([0, 0, 0.5], q=[-0.707, 0, 0.707, 0]),
-        )
+        ),
     )
 
     def __init__(self, *args, **kwargs):
@@ -98,7 +82,7 @@ class AllegroHandRight(BaseAgent):
         super().__init__(*args, **kwargs)
 
     def _after_init(self):
-        self.tip_links: List[sapien.Entity] = sapien_utils.get_objs_by_names(
+        self.tip_links: list[sapien.Entity] = sapien_utils.get_objs_by_names(
             self.robot.get_links(), self.tip_link_names
         )
         self.palm_link: sapien.Entity = sapien_utils.get_obj_by_name(

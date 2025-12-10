@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import numpy as np
 import sapien
@@ -8,7 +8,6 @@ from mani_skill import ASSET_DIR
 from mani_skill.agents.robots.fetch.fetch import Fetch
 from mani_skill.agents.robots.panda.panda import Panda
 from mani_skill.agents.robots.panda.panda_wristcam import PandaWristCam
-from mani_skill.agents.robots.xmate3.xmate3 import Xmate3Robotiq
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.utils.randomization.pose import random_quaternions
 from mani_skill.sensors.camera import CameraConfig
@@ -64,9 +63,19 @@ class PickSingleYCBEnv(BaseEnv):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.model_id = None
         self.all_model_ids = np.array(
-            list(
-                load_json(ASSET_DIR / "assets/mani_skill2_ycb/info_pick_v0.json").keys()
-            )
+            [
+                k
+                for k in load_json(
+                    ASSET_DIR / "assets/mani_skill2_ycb/info_pick_v0.json"
+                ).keys()
+                if k
+                not in [
+                    "022_windex_bottle",
+                    "028_skillet_lid",
+                    "029_plate",
+                    "059_chain",
+                ]  # NOTE (arth): ignore these non-graspable/hard to grasp ycb objects
+            ]
         )
         if reconfiguration_freq is None:
             if num_envs == 1:
@@ -79,6 +88,14 @@ class PickSingleYCBEnv(BaseEnv):
             reconfiguration_freq=reconfiguration_freq,
             num_envs=num_envs,
             **kwargs,
+        )
+
+    @property
+    def _default_sim_config(self):
+        return SimConfig(
+            gpu_memory_config=GPUMemoryConfig(
+                max_rigid_contact_count=2**20, max_rigid_patch_count=2**19
+            )
         )
 
     @property
@@ -117,7 +134,7 @@ class PickSingleYCBEnv(BaseEnv):
                 or set reconfiguration_freq to be >= 1."""
             )
 
-        self._objs: List[Actor] = []
+        self._objs: list[Actor] = []
         self.obj_heights = []
         for i, model_id in enumerate(model_ids):
             # TODO: before official release we will finalize a metadata dataclass that these build functions should return.
@@ -178,13 +195,6 @@ class PickSingleYCBEnv(BaseEnv):
                 )
                 self.agent.reset(qpos)
                 self.agent.robot.set_root_pose(sapien.Pose([-0.615, 0, 0]))
-            elif self.robot_uids == "xmate3_robotiq":
-                qpos = np.array([0, 0.6, 0, 1.3, 0, 1.3, -1.57, 0, 0])
-                qpos[:-2] += self._episode_rng.normal(
-                    0, self.robot_init_qpos_noise, len(qpos) - 2
-                )
-                self.agent.reset(qpos)
-                self.agent.robot.set_root_pose(sapien.Pose([-0.562, 0, 0]))
             else:
                 raise NotImplementedError(self.robot_uids)
 
@@ -202,7 +212,7 @@ class PickSingleYCBEnv(BaseEnv):
             success=torch.logical_and(is_obj_placed, is_robot_static),
         )
 
-    def _get_obs_extra(self, info: Dict):
+    def _get_obs_extra(self, info: dict):
         obs = dict(
             tcp_pose=self.agent.tcp.pose.raw_pose,
             goal_pos=self.goal_site.pose.p,
@@ -217,7 +227,7 @@ class PickSingleYCBEnv(BaseEnv):
             )
         return obs
 
-    def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
+    def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
         tcp_to_obj_dist = torch.linalg.norm(
             self.obj.pose.p - self.agent.tcp.pose.p, axis=1
         )
@@ -244,6 +254,6 @@ class PickSingleYCBEnv(BaseEnv):
         return reward
 
     def compute_normalized_dense_reward(
-        self, obs: Any, action: torch.Tensor, info: Dict
+        self, obs: Any, action: torch.Tensor, info: dict
     ):
         return self.compute_dense_reward(obs=obs, action=action, info=info) / 6

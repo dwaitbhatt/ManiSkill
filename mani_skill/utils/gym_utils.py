@@ -1,8 +1,6 @@
 """various gymnasium/gym utilities used in ManiSkill, mostly to handle observation/action spaces and noramlization"""
 
 
-from typing import Dict
-
 import gymnasium as gym
 import numpy as np
 import torch
@@ -10,6 +8,10 @@ from gymnasium import spaces
 
 from mani_skill.utils.logging_utils import logger
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+
+IS_GYMNASIUM_1 = False
+if gym.__version__ > "1.0.0":
+    IS_GYMNASIUM_1 = True
 
 
 def find_max_episode_steps_value(env):
@@ -46,7 +48,7 @@ def find_max_episode_steps_value(env):
 
 def extract_scalars_from_info(
     info: dict, blacklist=(), batch_size=1
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Recursively extract scalar metrics from an info dict returned by env.step.
 
     Args:
@@ -54,7 +56,7 @@ def extract_scalars_from_info(
         blacklist (tuple, optional): keys to exclude.
 
     Returns:
-        Dict[str, float]: scalar metrics
+        dict[str, float]: scalar metrics
     """
     ret = {}
     for k, v in info.items():

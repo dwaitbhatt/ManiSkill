@@ -4,7 +4,7 @@ Asset sources and tooling for managing the assets
 
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Optional
 
 from mani_skill import ASSET_DIR, PACKAGE_ASSET_DIR
 from mani_skill.utils import io_utils
@@ -27,9 +27,9 @@ class DataSource:
     output_dir: str = ASSET_DIR
 
 
-DATA_SOURCES: Dict[str, DataSource] = {}
+DATA_SOURCES: dict[str, DataSource] = {}
 """Data sources map data source IDs to their respective DataSource objects which contain info on what the data is and where to download it"""
-DATA_GROUPS: Dict[str, List[str]] = {}
+DATA_GROUPS: dict[str, list[str]] = {}
 """Data groups map group ids (typically environment IDs) to a list of data source/group IDs for easy group management. data groups can be done hierarchicaly"""
 
 
@@ -43,7 +43,7 @@ def initialize_data_sources():
         source_type="task_assets",
         url="https://huggingface.co/datasets/haosulab/ManiSkill2/resolve/main/data/mani_skill2_ycb.zip",
         target_path="assets/mani_skill2_ycb",
-        checksum="174001ba1003cc0c5adda6453f4433f55ec7e804f0f0da22d015d525d02262fb",
+        checksum="1551724fd1ac7bad9807ebcf46dd4a788caed5c9499c1225b9bfa080ffbefcb3",
     )
     DATA_SOURCES["pick_clutter_ycb_configs"] = DataSource(
         source_type="task_assets",
@@ -138,12 +138,6 @@ def initialize_data_sources():
     )
 
     # Robots
-    DATA_SOURCES["xmate3_robotiq"] = DataSource(
-        source_type="robot",
-        url="https://storage1.ucsd.edu/datasets/ManiSkill2022-assets/xmate3_robotiq.zip",
-        target_path="robots/xmate3_robotiq",
-        checksum="ddda102a20eb41e28a0a501702e240e5d7f4084221a44f580e729f08b7c12d1a",
-    )
     DATA_SOURCES["ur10e"] = DataSource(
         source_type="robot",
         url="https://github.com/haosulab/ManiSkill-UR10e/archive/refs/tags/v0.1.0.zip",
@@ -191,8 +185,23 @@ def initialize_data_sources():
     )
     DATA_SOURCES["xarm6"] = DataSource(
         source_type="robot",
-        url="https://github.com/haosulab/ManiSkill-XArm6/archive/refs/tags/v0.1.0.zip",
+        url="https://github.com/haosulab/ManiSkill-XArm6/archive/refs/tags/v0.1.1.zip",
         target_path="robots/xarm6",
+    )
+    DATA_SOURCES["widowxai"] = DataSource(
+        source_type="robot",
+        url="https://github.com/TrossenRobotics/ManiSkill-WidowX_AI/archive/refs/tags/v0.1.0.zip",
+        target_path="robots/widowxai",
+    )
+    DATA_SOURCES["xlerobot"] = DataSource(
+        source_type="robot",
+        url="https://github.com/Vector-Wangel/ManiSkill-XLeRobot/archive/refs/tags/v0.2.1.zip",
+        target_path="robots/xlerobot",
+    )
+    DATA_SOURCES["oakink-v2"] = DataSource(
+        source_type="task_assets",
+        url="https://huggingface.co/datasets/haosulab/OakInk-v2/resolve/main/object_repair.zip",
+        target_path="tasks/oakink-v2",
     )
 
 

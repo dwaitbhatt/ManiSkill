@@ -4,7 +4,7 @@ import json
 import sys
 from copy import deepcopy
 from functools import partial
-from typing import TYPE_CHECKING, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Optional, Type
 
 import gymnasium as gym
 import torch
@@ -25,7 +25,7 @@ class EnvSpec:
         uid: str,
         cls: Type[BaseEnv],
         max_episode_steps=None,
-        asset_download_ids: Optional[List[str]] = [],
+        asset_download_ids: Optional[list[str]] = [],
         default_kwargs: dict = None,
     ):
         """A specification for a ManiSkill environment."""
@@ -90,14 +90,14 @@ class EnvSpec:
         )
 
 
-REGISTERED_ENVS: Dict[str, EnvSpec] = {}
+REGISTERED_ENVS: dict[str, EnvSpec] = {}
 
 
 def register(
     name: str,
     cls: Type[BaseEnv],
     max_episode_steps=None,
-    asset_download_ids: List[str] = [],
+    asset_download_ids: list[str] = [],
     default_kwargs: dict = None,
 ):
     """Register a ManiSkill environment."""
@@ -193,7 +193,7 @@ def register_env(
     uid: str,
     max_episode_steps=None,
     override=False,
-    asset_download_ids: List[str] = [],
+    asset_download_ids: list[str] = [],
     **kwargs,
 ):
     """A decorator to register ManiSkill environments.
@@ -201,7 +201,7 @@ def register_env(
     Args:
         uid (str): unique id of the environment.
         max_episode_steps (int): maximum number of steps in an episode.
-        asset_download_ids (List[str]): asset download ids the environment depends on. When environments are created
+        asset_download_ids (list[str]): asset download ids the environment depends on. When environments are created
             this list is checked to see if the user has all assets downloaded and if not, prompt the user if they wish to download them.
         override (bool): whether to override the environment if it is already registered.
 
@@ -242,6 +242,7 @@ def register_env(
         gym.register(
             uid,
             entry_point=partial(make, env_id=uid),
+            # NOTE (stao): gym.make_vec is now deprecated and should not be used with ManiSkill. It does not work for gym versions > 1.
             vector_entry_point=partial(make_vec, env_id=uid),
             max_episode_steps=max_episode_steps,
             disable_env_checker=True,  # Temporary solution as we allow empty observation spaces

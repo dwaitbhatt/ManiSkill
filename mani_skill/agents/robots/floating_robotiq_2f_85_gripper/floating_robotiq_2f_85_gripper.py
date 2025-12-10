@@ -1,8 +1,8 @@
-from typing import Dict, List, Union
+from typing import Union
 
 import numpy as np
 import sapien
-import torch
+from transforms3d.euler import euler2quat
 
 from mani_skill import ASSET_DIR, PACKAGE_ASSET_DIR
 from mani_skill.agents.base_agent import BaseAgent, DictControllerConfig, Keyframe
@@ -33,8 +33,12 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
         ),
     )
     keyframes = dict(
+        open_facing_down=Keyframe(
+            qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5]), q=euler2quat(np.pi, 0, 0)),
+        ),
         open_facing_up=Keyframe(
-            qpos=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            qpos=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             pose=sapien.Pose(p=np.array([0.0, 0.0, 0.5])),
         ),
         open_facing_side=Keyframe(
@@ -57,7 +61,7 @@ class FloatingRobotiq2F85Gripper(BaseAgent):
     @property
     def _controller_configs(
         self,
-    ) -> Dict[str, Union[ControllerConfig, DictControllerConfig]]:
+    ) -> dict[str, Union[ControllerConfig, DictControllerConfig]]:
 
         # define a simple controller to control the floating base with XYZ/RPY control.
         base_pd_joint_pos = PDJointPosControllerConfig(
